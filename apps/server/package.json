@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@dash/contract": "workspace:*",
+    "@fastify/static": "^10.1.10",
     "better-sqlite3": "^13.1.1",
     "drizzle-orm": "^0.45.4",
     "fastify": "^5.0.0",
