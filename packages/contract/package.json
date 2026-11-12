@@ -12,5 +12,16 @@
   },
   "dependencies": {
     "zod": "^4.6.7"
+  },
+  "peerDependencies": {
+    "svelte": "^5.57.3"
+  },
+  "peerDependenciesMeta": {
+    "svelte": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "svelte": "^5.57.3"
   }
 }
