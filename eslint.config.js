@@ -37,6 +37,8 @@ export default tseslint.config(
       '**/playwright-report/**',
       '.superpowers/**',
       '.claude/**',
+      '**/generated/**',
+      'tools/templates/**',
     ],
   },
   js.configs.recommended,

@@ -6,3 +6,5 @@ dist
 coverage
 playwright-report
 .claude/
+apps/server/src/generated
+apps/web/src/generated
