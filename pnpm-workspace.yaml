@@ -3,3 +3,6 @@ packages:
   - 'packages/*'
   - 'modules/*'
   - 'themes/*'
+
+allowBuilds:
+  esbuild: false
