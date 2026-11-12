@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import path from 'node:path';
-import { runServerContractSuite, serverContractCases } from '../src/index.js';
+import { runServerContractSuite, serverContractCases } from '../src/testing.js';
 import { goodHappyHttp, goodServer } from './sample-module/good/server.js';
 import { badServer } from './sample-module/bad/server.js';
 

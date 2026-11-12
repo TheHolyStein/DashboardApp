@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DashError } from '@dash/contract';
-import { applyMigrations, createMockHost, createMockRouter, loadFixture } from '../src/index.js';
+import { applyMigrations, createMockHost, createMockRouter, loadFixture } from '../src/testing.js';
 import { goodServer } from './sample-module/good/server.js';
 import { goodManifest } from './sample-module/good/manifest.js';
 import path from 'node:path';

@@ -1,6 +1,3 @@
-// Server-side entry. Never import suite-client here: it pulls in svelte and jsdom-only code.
+// Runtime entry: safe for production server and browser bundles. Test helpers live in ./testing.
 export * from './abortable.js';
 export * from './define.js';
-export * from './mock-host.js';
-export * from './fixtures.js';
-export * from './suite-server.js';

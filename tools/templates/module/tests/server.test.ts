@@ -1,4 +1,4 @@
-import { runServerContractSuite } from '@dash/module-kit';
+import { runServerContractSuite } from '@dash/module-kit/testing';
 import server from '../server/index.js';
 
 runServerContractSuite(server, {

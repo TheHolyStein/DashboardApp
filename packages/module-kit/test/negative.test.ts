@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { DashError, type ModuleServer } from '@dash/contract';
-import { serverContractCases, type ServerSuiteOptions } from '../src/index.js';
+import { serverContractCases, type ServerSuiteOptions } from '../src/testing.js';
 import { goodHappyHttp, goodServer } from './sample-module/good/server.js';
 import { goodManifest } from './sample-module/good/manifest.js';
 
