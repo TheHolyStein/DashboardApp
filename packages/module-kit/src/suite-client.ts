@@ -103,16 +103,20 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     if (container.innerHTML.trim() === '') fail(`${what} rendered nothing`);
   };
 
-  const fixtureText = [...collectStrings(tileData, []), ...collectStrings(detailData, [])].join('\n').toLowerCase();
+  const tokenize = (s: string): string[] =>
+    s
+      .split(/\s+/)
+      .map((w) => w.replace(/[\p{P}\p{S}\d]/gu, '').toLowerCase())
+      .filter((w) => w !== '');
+  // Whole tokens only: a hard-coded "no" must not pass because the fixture contains "north".
+  const fixtureTokens = new Set(
+    [...collectStrings(tileData, []), ...collectStrings(detailData, [])].flatMap(tokenize),
+  );
   const checkTexts = (what: string, container: HTMLElement): void => {
     const offenders: string[] = [];
     for (const text of textNodes(container)) {
       const leftover = text.replace(new RegExp(`${MARK_OPEN}[^${MARK_CLOSE}]*${MARK_CLOSE}`, 'g'), ' ');
-      const words = leftover
-        .split(/\s+/)
-        .map((w) => w.replace(/[\p{P}\p{S}\d]/gu, ''))
-        .filter((w) => w !== '');
-      const bare = words.filter((w) => !fixtureText.includes(w.toLowerCase()));
+      const bare = tokenize(leftover).filter((w) => !fixtureTokens.has(w));
       if (bare.length > 0) offenders.push(`${what}: "${text}"`);
     }
     if (offenders.length > 0) fail(`text not passed through t(): ${offenders.join('; ')}`);
@@ -162,8 +166,17 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     {
       name: 'all visible text goes through t()',
       run: () => {
-        renderTile(tileProps({ t: markedT }), (c) => checkTexts('tile', c));
+        const states: Array<[string, Partial<TileProps>]> = [
+          ['tile', {}],
+          ['tile (data undefined)', { data: undefined, updatedAt: null }],
+          ['tile (stale)', { stale: true }],
+        ];
+        for (const [what, over] of states) renderTile(tileProps({ t: markedT, ...over }), (c) => checkTexts(what, c));
         renderDetail(detailProps({ t: markedT }), (c) => checkTexts('detail', c));
+        renderDetail(detailProps({ t: markedT, data: undefined, updatedAt: null }), (c) =>
+          checkTexts('detail (data undefined)', c),
+        );
+        renderDetail(detailProps({ t: markedT, stale: true }), (c) => checkTexts('detail (stale)', c));
         return Promise.resolve();
       },
     },

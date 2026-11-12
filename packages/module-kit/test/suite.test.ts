@@ -52,6 +52,7 @@ describe('server contract suite: bad sample', () => {
       'view level cannot call edit routes',
       'job survives bad upstream',
       'job publishes only declared events',
+      'job honors abort signal',
     ]);
   });
 });

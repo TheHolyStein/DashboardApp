@@ -295,10 +295,8 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
         host.respond(/.*/, 'hang');
         for (const target of await jobTargets(server, host)) {
           const controller = new AbortController();
-          const timer = setTimeout(() => {
-            controller.abort();
-            host.abortPending();
-          }, 10);
+          // Abort the signal only: HttpOptions carries no signal, so the job itself must observe it.
+          const timer = setTimeout(() => controller.abort(), 10);
           const result = await settle(runJob(host, target, controller.signal), 200);
           clearTimeout(timer);
           if (result.kind === 'timeout') problems.push(`job "${target.name}" still running 200 ms after abort`);

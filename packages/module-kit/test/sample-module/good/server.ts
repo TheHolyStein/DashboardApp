@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { DashError } from '@dash/contract';
-import { defineServer } from '../../../src/index.js';
+import { abortable, defineServer } from '../../../src/index.js';
 import { goodManifest } from './manifest.js';
 
 const Upstream = z.object({ value: z.number(), label: z.string() });
@@ -12,13 +12,16 @@ export const goodServer = defineServer({
     { id: 2, up: 'CREATE INDEX m_sample_items_title ON m_sample_items (title)' },
   ],
   jobs: {
-    async refresh({ host }) {
-      const key = await host.secrets.get('apiKey');
+    async refresh({ host, signal }) {
+      const key = await abortable(signal, host.secrets.get('apiKey'));
       let res;
       try {
-        res = await host.http.fetch('https://api.example.test/data', {
-          headers: key ? { authorization: `Bearer ${key}` } : {},
-        });
+        res = await abortable(
+          signal,
+          host.http.fetch('https://api.example.test/data', {
+            headers: key ? { authorization: `Bearer ${key}` } : {},
+          }),
+        );
       } catch (e) {
         throw e instanceof DashError ? e : new DashError('upstream', 'request failed');
       }
