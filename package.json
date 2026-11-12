@@ -1,0 +1,36 @@
+{
+  "name": "dashboard",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "dev": "pnpm -r --if-present --parallel dev",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "lint": "eslint . --ignore-pattern tools/lint-fixtures",
+    "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build": "pnpm -r --if-present build",
+    "e2e": "echo 'e2e: not yet implemented'",
+    "gen": "echo 'gen: not yet implemented'",
+    "new:module": "echo 'new:module: not yet implemented'",
+    "new:theme": "echo 'new:theme: not yet implemented'"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.14.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-boundaries": "6.0.2",
+    "eslint-plugin-svelte": "^3.24.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.0",
+    "svelte": "^5.57.3",
+    "svelte-eslint-parser": "^1.10.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}

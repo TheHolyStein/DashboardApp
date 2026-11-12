@@ -1,6 +1,8 @@
-node_modules/
-dist/
-.data/
-.superpowers/
+node_modules
+dist
+.data
+.superpowers
+*.local
+coverage
+playwright-report
 .claude/
-*.log
