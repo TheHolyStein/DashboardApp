@@ -1,0 +1,32 @@
+{
+  "name": "@dash/module-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/suite-client.ts",
+    "./vitest": "./src/vitest.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dash/contract": "workspace:*",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@testing-library/svelte": "^5.4.2",
+    "better-sqlite3": "^13.1.1",
+    "jsdom": "^31.0.0",
+    "zod": "^4.6.7"
+  },
+  "peerDependencies": {
+    "svelte": "^5.57.3",
+    "vitest": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "svelte": "^5.57.3",
+    "vitest": "^5.1.0"
+  }
+}
