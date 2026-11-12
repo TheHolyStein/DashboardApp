@@ -36,7 +36,7 @@ export interface ModuleManifest<
   rootMounts?: ReadonlyArray<RootMount>;    // core allowlists these per module id
 }
 
-const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+export const SEMVER_RE =/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 function sizeWithin(size: TileSize, lo: TileSize, hi: TileSize): boolean {
   return size.w >= lo.w && size.h >= lo.h && size.w <= hi.w && size.h <= hi.h;

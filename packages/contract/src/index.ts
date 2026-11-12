@@ -6,3 +6,5 @@ export * from './host.js';
 export * from './server.js';
 export * from './client.js';
 export * from './api.js';
+export * from './theme.js';
+export * from './tokens.js';
