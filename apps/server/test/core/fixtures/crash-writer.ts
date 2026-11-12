@@ -17,7 +17,10 @@ const commitBatch = db.transaction(() => {
 let committed = 0;
 writeSync(1, 'ready\n');
 for (;;) {
+  // `intent` is printed before COMMIT, `done` after it (synchronous writes, one per line). A kill
+  // between COMMIT and the `done` line leaves the DB at the last `intent` value.
+  writeSync(1, `intent ${committed + BATCH}\n`);
   commitBatch();
   committed += BATCH;
-  writeSync(1, `${committed}\n`); // synchronous, one write per line
+  writeSync(1, `done ${committed}\n`);
 }

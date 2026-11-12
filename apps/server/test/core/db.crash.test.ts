@@ -39,20 +39,23 @@ describe('crash safety', () => {
     expect(signal).toBe('SIGKILL');
 
     // Only fully received lines (terminated by \n) count; a trailing partial line is dropped.
-    const lines = out.split('\n').slice(0, -1).filter((l) => /^\d+$/.test(l));
-    expect(lines.length).toBeGreaterThan(0);
-    const lastReported = Number(lines[lines.length - 1]);
+    const lines = out.split('\n').slice(0, -1);
+    const last = (tag: 'intent' | 'done'): number => {
+      const hit = lines.filter((l) => l.startsWith(`${tag} `)).at(-1);
+      return hit === undefined ? 0 : Number(hit.slice(tag.length + 1));
+    };
+    const lastDone = last('done');
+    const lastIntent = last('intent');
+    expect(lastDone).toBeGreaterThan(0);
 
     const db = openDb(file);
     try {
       expect(db.pragma('integrity_check', { simple: true })).toBe('ok');
       const { c } = db.prepare('SELECT count(*) AS c FROM crash_rows').get() as { c: number };
-      // Every reported commit is durable, and no transaction is half-applied. The child may have
-      // committed one more batch whose line was not yet written when the kill landed (the window
-      // between COMMIT returning and writeSync), hence the upper bound of one batch.
+      // Exact: the kill either landed before COMMIT (count = last `done`) or between COMMIT and
+      // the `done` line (count = last `intent`). Never a partial batch, never a lost commit.
+      expect([lastDone, lastIntent]).toContain(c);
       expect(c % BATCH).toBe(0);
-      expect(c).toBeGreaterThanOrEqual(lastReported);
-      expect(c).toBeLessThanOrEqual(lastReported + BATCH);
     } finally {
       db.close();
     }

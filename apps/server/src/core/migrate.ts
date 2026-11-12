@@ -37,46 +37,76 @@ export function modulePrefix(moduleId: ModuleId): string {
   return `m_${moduleId.replaceAll('-', '_')}_`;
 }
 
-// An identifier as written in SQL: optionally schema-qualified, optionally quoted with "", ``, or [].
-const IDENT = String.raw`(?:(?:"[^"]*"|\`[^\`]*\`|\[[^\]]*\]|\w+)\s*\.\s*)?("[^"]*"|\`[^\`]*\`|\[[^\]]*\]|\w+)`;
-const IF_NOT_EXISTS = String.raw`(?:IF\s+NOT\s+EXISTS\s+)?`;
-const IF_EXISTS = String.raw`(?:IF\s+EXISTS\s+)?`;
-
-/** [pattern, group indexes that capture names that must carry the module prefix] */
-const CHECKS: Array<[RegExp, number[]]> = [
-  [new RegExp(String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:VIRTUAL\s+)?TABLE\s+${IF_NOT_EXISTS}${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+${IF_NOT_EXISTS}${IDENT}\s+ON\s+${IDENT}`, 'gi'), [1, 2]],
-  [new RegExp(String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\s+${IF_NOT_EXISTS}${IDENT}[^;]*?\bON\s+${IDENT}`, 'gi'), [1, 2]],
-  [new RegExp(String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?VIEW\s+${IF_NOT_EXISTS}${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`\bALTER\s+TABLE\s+${IDENT}(?:\s+RENAME\s+TO\s+${IDENT})?`, 'gi'), [1, 2]],
-  [new RegExp(String.raw`\bDROP\s+(?:TABLE|INDEX|TRIGGER|VIEW)\s+${IF_EXISTS}${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`\bREPLACE\s+INTO\s+${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`(?<!\bDO\s+)\bUPDATE\s+(?:OR\s+\w+\s+)?${IDENT}`, 'gi'), [1]],
-  [new RegExp(String.raw`\bDELETE\s+FROM\s+${IDENT}`, 'gi'), [1]],
-];
-// "UPDATE OF col ON t" / "UPDATE ON t" in trigger headers are not UPDATE statements.
-const NOT_A_TABLE = new Set(['on', 'of', 'set']);
-const FORBIDDEN = /\b(?:ATTACH|DETACH|PRAGMA)\b/i;
-
-function unquote(name: string): string {
-  const first = name[0];
-  if (first === '"' || first === '`' || first === '[') return name.slice(1, -1);
-  return name;
-}
-
-/** Remove comments and string literals so keywords inside them are not matched. */
-function stripNoise(sql: string): string {
-  return sql
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/'(?:[^']|'')*'/g, "''");
+interface Token {
+  kind: 'word' | 'name' | 'str' | 'punct'; // name = "x", `x`, [x]; str = 'x'; word = bare word
+  value: string; // unquoted for name/str
 }
 
 /**
+ * One left-to-right pass: comments are dropped, string literals and quoted identifiers become single
+ * tokens, so comment markers inside literals (and keywords inside literals/comments) cannot hide or
+ * fake statements. Unterminated strings/comments throw (fail closed).
+ */
+function tokenize(sql: string, fail: (why: string) => never): Token[] {
+  const out: Token[] = [];
+  let i = 0;
+  const quoted = (open: string, close: string, kind: Token['kind']): void => {
+    let j = i + 1;
+    let value = '';
+    for (;;) {
+      if (j >= sql.length) fail(`unterminated ${open}…${close} token`);
+      if (sql[j] === close) {
+        if (open === close && sql[j + 1] === close) {
+          value += close; // doubled quote is an escaped quote
+          j += 2;
+          continue;
+        }
+        break;
+      }
+      value += sql[j];
+      j++;
+    }
+    out.push({ kind, value });
+    i = j + 1;
+  };
+  while (i < sql.length) {
+    const c = sql[i] as string;
+    if (/\s/.test(c)) i++;
+    else if (c === '-' && sql[i + 1] === '-') {
+      const nl = sql.indexOf('\n', i);
+      i = nl === -1 ? sql.length : nl + 1;
+    } else if (c === '/' && sql[i + 1] === '*') {
+      const end = sql.indexOf('*/', i + 2);
+      if (end === -1) fail('unterminated comment');
+      i = end + 2;
+    } else if (c === "'") quoted("'", "'", 'str');
+    else if (c === '"') quoted('"', '"', 'name');
+    else if (c === '`') quoted('`', '`', 'name');
+    else if (c === '[') quoted('[', ']', 'name');
+    else {
+      const m = /^[A-Za-z_][A-Za-z0-9_$]*/.exec(sql.slice(i));
+      if (m) {
+        out.push({ kind: 'word', value: m[0] });
+        i += m[0].length;
+      } else {
+        out.push({ kind: 'punct', value: c });
+        i++;
+      }
+    }
+  }
+  return out;
+}
+
+const isWord = (t: Token | undefined, ...words: string[]): boolean =>
+  t?.kind === 'word' && words.includes(t.value.toUpperCase());
+
+/**
  * Checks that every table/index/trigger/view that a migration creates, alters, drops, or writes to
- * starts with the module's prefix. This is a regex scan, not a SQL parser: it decides what can be
- * decided cheaply and rejects ATTACH/DETACH/PRAGMA outright.
+ * starts with the module's prefix. This is a token scan, not a SQL parser: it decides what can be
+ * decided cheaply and fails closed, i.e. a statement keyword (CREATE, ALTER, DROP, INSERT, REPLACE
+ * INTO, UPDATE, DELETE) that is not followed by a name the scanner can read is rejected. Names may
+ * be bare, "double", `backtick`, [bracket] or 'single' quoted; a schema qualifier other than `main`
+ * is rejected. ATTACH, DETACH and PRAGMA are rejected outright.
  *
  * Known limit: the prefix of module `news` (`m_news_`) is also a prefix of tables of module
  * `news-extra` (`m_news_extra_...`). A table named `m_news_extra_x` is indistinguishable from a
@@ -92,22 +122,111 @@ export function assertMigrationScope(moduleId: ModuleId, migration: Migration): 
       migration: migration.id,
     });
   };
-  const sql = stripNoise(migration.up);
-  if (FORBIDDEN.test(sql)) fail('ATTACH, DETACH and PRAGMA are not allowed');
-  for (const [re, groups] of CHECKS) {
-    for (const m of sql.matchAll(re)) {
-      for (const g of groups) {
-        const raw = m[g];
-        if (raw === undefined) continue;
-        const name = unquote(raw);
-        if (NOT_A_TABLE.has(name.toLowerCase()) && /\bUPDATE\b/i.test(m[0])) continue;
-        if (!name.toLowerCase().startsWith(prefix)) {
-          fail(`"${name}" does not start with required prefix ${prefix}`);
+  const toks = tokenize(migration.up, fail);
+
+  /** Reads `[schema .] name` at index i, checks the prefix, returns the index after it. */
+  const name = (i: number, what: string): number => {
+    let t = toks[i];
+    if (t === undefined || t.kind === 'punct') return fail(`${what} is not followed by a table name`);
+    if (isWord(t, 'IF', 'NOT', 'EXISTS', 'ON', 'SET', 'FROM', 'INTO', 'TO', 'OF')) {
+      return fail(`${what} is not followed by a table name`);
+    }
+    const dot = toks[i + 1];
+    if (dot?.kind === 'punct' && dot.value === '.') {
+      if (t.value.toLowerCase() !== 'main') return fail(`schema "${t.value}" is not allowed`);
+      i += 2;
+      t = toks[i];
+      if (t === undefined || t.kind === 'punct') return fail(`${what} is not followed by a table name`);
+    }
+    if (!t.value.toLowerCase().startsWith(prefix)) {
+      return fail(`"${t.value}" does not start with required prefix ${prefix}`);
+    }
+    return i + 1;
+  };
+  const skipIf = (i: number, ...seq: string[]): number =>
+    seq.every((w, k) => isWord(toks[i + k], w)) ? i + seq.length : i;
+
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i] as Token;
+    if (t.kind !== 'word') continue;
+    const prev = toks[i - 1];
+    switch (t.value.toUpperCase()) {
+      case 'ATTACH':
+      case 'DETACH':
+      case 'PRAGMA':
+        fail('ATTACH, DETACH and PRAGMA are not allowed');
+        break;
+      case 'CREATE': {
+        let j = i + 1;
+        while (isWord(toks[j], 'TEMP', 'TEMPORARY', 'UNIQUE', 'VIRTUAL')) j++;
+        const kind = toks[j];
+        if (!isWord(kind, 'TABLE', 'INDEX', 'TRIGGER', 'VIEW')) {
+          fail('CREATE is not followed by TABLE, INDEX, TRIGGER or VIEW');
+          break;
         }
+        j = name(skipIf(j + 1, 'IF', 'NOT', 'EXISTS'), 'CREATE');
+        if (isWord(kind, 'INDEX')) {
+          if (!isWord(toks[j], 'ON')) fail('CREATE INDEX without ON');
+          name(j + 1, 'CREATE INDEX ... ON');
+        } else if (isWord(kind, 'TRIGGER')) {
+          while (j < toks.length && !isWord(toks[j], 'ON')) j++;
+          if (j >= toks.length) fail('CREATE TRIGGER without ON');
+          name(j + 1, 'CREATE TRIGGER ... ON');
+        }
+        break;
       }
+      case 'ALTER': {
+        if (!isWord(toks[i + 1], 'TABLE')) {
+          fail('ALTER is not followed by TABLE');
+          break;
+        }
+        const j = name(i + 2, 'ALTER TABLE');
+        if (isWord(toks[j], 'RENAME') && isWord(toks[j + 1], 'TO')) name(j + 2, 'RENAME TO');
+        break;
+      }
+      case 'DROP': {
+        if (!isWord(toks[i + 1], 'TABLE', 'INDEX', 'TRIGGER', 'VIEW')) {
+          fail('DROP is not followed by TABLE, INDEX, TRIGGER or VIEW');
+          break;
+        }
+        name(skipIf(i + 2, 'IF', 'EXISTS'), 'DROP');
+        break;
+      }
+      case 'INSERT': // "AFTER INSERT ON t" in a trigger header is not a statement
+        if (isWord(toks[i + 1], 'ON')) break;
+        {
+          let j = i + 1;
+          if (isWord(toks[j], 'OR')) j += 2;
+          if (!isWord(toks[j], 'INTO')) {
+            fail('INSERT is not followed by INTO');
+            break;
+          }
+          name(j + 1, 'INSERT INTO');
+        }
+        break;
+      case 'REPLACE': // replace(...) is a function; REPLACE INTO is a statement
+        if (isWord(toks[i + 1], 'INTO')) name(i + 2, 'REPLACE INTO');
+        break;
+      case 'UPDATE': // not a statement after DO (upsert) or in a trigger header ("UPDATE [OF cols] ON t")
+        if (isWord(prev, 'DO') || isWord(toks[i + 1], 'ON', 'OF')) break;
+        {
+          let j = i + 1;
+          if (isWord(toks[j], 'OR')) j += 2;
+          name(j, 'UPDATE');
+        }
+        break;
+      case 'DELETE':
+        if (isWord(toks[i + 1], 'ON')) break; // trigger header
+        if (!isWord(toks[i + 1], 'FROM')) {
+          fail('DELETE is not followed by FROM');
+          break;
+        }
+        name(i + 2, 'DELETE FROM');
+        break;
     }
   }
 }
+
 
 /**
  * Applies the module's pending migrations (id greater than module_state.migration_id), ascending,
