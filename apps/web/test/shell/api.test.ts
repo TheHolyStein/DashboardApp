@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { DashError, MeDto } from '@dash/contract';
+import { DashError } from '@dash/contract';
 import { z } from 'zod';
 import { api, moduleApi } from '../../src/lib/api.js';
 import { session } from '../../src/lib/session.svelte.js';
@@ -69,13 +69,13 @@ describe('api', () => {
   it('moduleApi encodes the query string under /api/m/<id>/', async () => {
     let url = '';
     server.use(
-      http.get('/api/m/x/a', ({ request }) => {
+      http.get('/api/m/xx/a', ({ request }) => {
         url = new URL(request.url).pathname + new URL(request.url).search;
         return HttpResponse.json({ ok: true });
       }),
     );
-    await moduleApi('x').get('/a', { q: 1 });
-    expect(url).toBe('/api/m/x/a?q=1');
+    await moduleApi('xx').get('/a', { q: 1 });
+    expect(url).toBe('/api/m/xx/a?q=1');
   });
 
   it('401 anywhere returns to login', async () => {
@@ -91,6 +91,30 @@ describe('api', () => {
     server.use(http.get('/api/me', () => errorResponse('unauthenticated', 401)));
     await expect(session.refresh()).resolves.toBeUndefined();
     expect(session.status).toBe('signedOut');
-    expect(MeDto).toBeDefined();
+  });
+
+  describe('moduleApi confinement', () => {
+    const badPaths = ['/../../auth/logout', '/a/../b', '/./a', 'a', '/a?x=1', '/a#h', '/a\\b', '/%2e%2e/x', '/%2E/x', '/a%2fb', '/a%2Fb', '/a%5cb', '/a%5Cb'];
+    it.each(badPaths)('rejects path %s without a request', async (p) => {
+      const spy = vi.spyOn(globalThis, 'fetch');
+      for (const call of [
+        () => moduleApi('xx').get(p),
+        () => moduleApi('xx').post(p, {}),
+        () => moduleApi('xx').put(p, {}),
+        () => moduleApi('xx').patch(p, {}),
+        () => moduleApi('xx').delete(p),
+      ]) {
+        await expect(call()).rejects.toMatchObject({ code: 'invalid' });
+      }
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+    it.each(['X', '1a', 'a', '../x', 'a/b', 'a'.repeat(33), ''])('rejects module id %j', (id) => {
+      expect(() => moduleApi(id)).toThrow(DashError);
+    });
+    it('accepts a normal nested path', async () => {
+      server.use(http.get('/api/m/xx/a/b-c', () => HttpResponse.json({ ok: true })));
+      await expect(moduleApi('xx').get('/a/b-c')).resolves.toEqual({ ok: true });
+    });
   });
 });

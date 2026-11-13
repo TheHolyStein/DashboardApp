@@ -1,4 +1,4 @@
-import { DashError, ErrorDto, type ErrorCode, type ModuleApi, type ModuleId } from '@dash/contract';
+import { DashError, ErrorDto, ID_RE, type ErrorCode, type ModuleApi, type ModuleId } from '@dash/contract';
 import type { z } from 'zod';
 
 interface ApiHooks {
@@ -66,16 +66,36 @@ export const api = {
   delete: <T>(path: string, schema?: z.ZodType<T>) => request<T>('DELETE', path, undefined, schema),
 };
 
+/** Keep a module-relative path inside `/api/m/<id>/`: no dot segments, query, fragment, backslash or encoded `.`/`/`/`\`. */
+function checkModulePath(path: string): string {
+  const bad =
+    !path.startsWith('/') ||
+    /[?#\\]/.test(path) ||
+    /%(2e|2f|5c)/i.test(path) ||
+    path.split('/').some((seg) => seg === '.' || seg === '..');
+  if (bad) throw new DashError('invalid', `Invalid module API path: ${path}`);
+  return path;
+}
+
 export function moduleApi(moduleId: ModuleId): ModuleApi {
+  if (!ID_RE.test(moduleId)) throw new DashError('invalid', `Invalid module id: ${moduleId}`);
   const base = `/m/${moduleId}`;
+  // Validation failures reject the returned promise; no request is made.
+  const guard = <T>(path: string, run: (full: string) => Promise<T>): Promise<T> => {
+    try {
+      return run(`${base}${checkModulePath(path)}`);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  };
   return {
     get: <T>(path: string, query?: Record<string, string | number | boolean>) => {
       const qs = query ? new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString() : '';
-      return api.get<T>(`${base}${path}${qs ? `?${qs}` : ''}`);
+      return guard(path, (full) => api.get<T>(`${full}${qs ? `?${qs}` : ''}`));
     },
-    post: <T>(path: string, body?: unknown) => api.post<T>(`${base}${path}`, body),
-    put: <T>(path: string, body?: unknown) => api.put<T>(`${base}${path}`, body),
-    patch: <T>(path: string, body?: unknown) => api.patch<T>(`${base}${path}`, body),
-    delete: <T>(path: string) => api.delete<T>(`${base}${path}`),
+    post: <T>(path: string, body?: unknown) => guard(path, (full) => api.post<T>(full, body)),
+    put: <T>(path: string, body?: unknown) => guard(path, (full) => api.put<T>(full, body)),
+    patch: <T>(path: string, body?: unknown) => guard(path, (full) => api.patch<T>(full, body)),
+    delete: <T>(path: string) => guard(path, (full) => api.delete<T>(full)),
   };
 }

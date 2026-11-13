@@ -19,24 +19,33 @@
     if (busy) return;
     busy = true;
     error = '';
+    const wasTotp = needTotp;
     try {
       await session.login(name, password, needTotp ? totp : undefined);
     } catch (err) {
-      password = '';
-      if (err instanceof DashError) {
-        const d = err.details as { totpRequired?: boolean; retryAfterSec?: number } | undefined;
-        if (err.code === 'invalid' && d?.totpRequired === true) {
-          needTotp = true;
-        } else if (err.code === 'rate_limited') {
-          const n = Math.max(1, Math.ceil((d?.retryAfterSec ?? 60) / 60));
-          error = t('login.rateLimited', 'Too many attempts, try again in {n} minutes', { n });
-        } else if (err.code === 'unauthenticated') {
-          error = t('login.failed', 'Sign-in failed. Check your name and password.');
-        } else {
-          error = generic();
-        }
+      const d = err instanceof DashError ? (err.details as { totpRequired?: boolean; retryAfterSec?: number } | undefined) : undefined;
+      const code = err instanceof DashError ? err.code : undefined;
+      if (code === 'rate_limited') {
+        password = '';
+        const sec = d?.retryAfterSec ?? 60;
+        const n = Math.ceil(sec / 60);
+        error =
+          sec < 60
+            ? t('login.rateLimitedSeconds', 'Too many attempts, try again in {n} seconds', { n: Math.max(1, Math.ceil(sec)) })
+            : n === 1
+              ? t('login.rateLimitedMinute', 'Too many attempts, try again in 1 minute')
+              : t('login.rateLimitedMinutes', 'Too many attempts, try again in {n} minutes', { n });
+        totp = '';
+      } else if (wasTotp && (code === 'unauthenticated' || (code === 'invalid' && d?.totpRequired === true))) {
+        // Resubmit needs name, password and code together, so the password stays; only the code is cleared.
+        totp = '';
+        error = t('login.totpFailed', 'The code or password is incorrect.');
+      } else if (code === 'invalid' && d?.totpRequired === true) {
+        // First TOTP prompt: the password was accepted as far as the server checked; keep it for the resubmit.
+        needTotp = true;
       } else {
-        error = generic();
+        password = '';
+        error = code === 'unauthenticated' ? t('login.failed', 'Sign-in failed. Check your name and password.') : generic();
       }
     } finally {
       busy = false;
