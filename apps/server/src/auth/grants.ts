@@ -30,11 +30,11 @@ export interface Grants {
   /** Deletes all stored rows of a (deleted) user. */
   removeUserGrants: (userId: UserId) => void;
   /**
-   * Recomputes the user's effective level on every module and fires the callbacks for each change.
-   * `beforeRole` is the role before the change; omit it when unknown (a plain enabled member is assumed).
-   * The role lookup behind `deps.userRole` must already reflect the change.
+   * Runs `mutate` (which must change the user's role, status or rows AND whatever backs `deps.userRole`),
+   * then fires the callbacks for every module whose effective level for this user changed.
+   * "Before" is snapshotted before `mutate`, "after" once it returned; if it throws nothing fires.
    */
-  notifyUserChanged: (userId: UserId, beforeRole?: 'admin' | 'member' | null) => void;
+  applyUserChange: (userId: UserId, mutate: () => void) => void;
 }
 
 const key = (userId: string, moduleId: string): string => `${userId}\u0000${moduleId}`;
@@ -115,23 +115,25 @@ export function createGrants(deps: GrantsDeps): Grants {
           .run(input.userId, input.moduleId, input.level);
         stored.set(k, input.level);
       }
-      deps.audit({
-        userId: actor.id,
-        action: 'grant.change',
-        detail: { target: input.userId, moduleId: input.moduleId, from: oldStored, to: input.level },
-        ...(ip ? { ip } : {}),
-      });
-      const after = resolve(role, input.userId, mod, input.moduleId);
-      if (after !== before) fire(input.userId, input.moduleId, after);
-    },
-    notifyUserChanged: (userId, beforeRole) => {
-      const oldRole = beforeRole === undefined ? 'member' : beforeRole;
-      const newRole = deps.userRole(userId);
-      for (const m of deps.modules()) {
-        const before = resolve(oldRole, userId, m, m.id);
-        const after = resolve(newRole, userId, m, m.id);
-        if (before !== after) fire(userId, m.id, after);
+      try {
+        deps.audit({
+          userId: actor.id,
+          action: 'grant.change',
+          detail: { target: input.userId, moduleId: input.moduleId, from: oldStored, to: input.level },
+          ...(ip ? { ip } : {}),
+        });
+      } finally {
+        // The effective level has already changed, so listeners hear about it even if the audit write failed.
+        const after = resolve(role, input.userId, mod, input.moduleId);
+        if (after !== before) fire(input.userId, input.moduleId, after);
       }
+    },
+    applyUserChange: (userId, mutate) => {
+      const levels = (): Array<[ModuleId, PermissionLevel]> =>
+        deps.modules().map((m) => [m.id, resolve(deps.userRole(userId), userId, m, m.id)]);
+      const before = new Map(levels());
+      mutate();
+      for (const [moduleId, level] of levels()) if (before.get(moduleId) !== level) fire(userId, moduleId, level);
     },
   };
 }

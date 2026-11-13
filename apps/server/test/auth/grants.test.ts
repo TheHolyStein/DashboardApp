@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAudit } from '../../src/core/audit.ts';
-import { createAuth } from '../../src/auth/index.ts';
+import { createAuth, disableUser } from '../../src/auth/index.ts';
 import { loadConfig } from '../../src/core/config.ts';
 import { makeAuthEnv, type AuthEnv } from './env.ts';
 
@@ -10,6 +10,12 @@ const MODULES = [
 ];
 
 let env: AuthEnv;
+/** A fresh createAuth over the same database (cold caches, as after a restart). */
+const fresh = (): ReturnType<typeof createAuth> =>
+  createAuth(
+    { db: env.db, audit: createAudit(env.db, () => env.clock.now), config: loadConfig({ NODE_ENV: 'test' }) },
+    { modules: () => MODULES.map((m) => ({ id: m.id, levels: [...m.levels] })) },
+  );
 afterEach(async () => {
   await env.app.close();
 });
@@ -145,16 +151,95 @@ describe('grants', () => {
     expect(auth2.levelFor(member.id, 'notes')).toBe('view');
   });
 
-  it('notifyUserChanged after a member is promoted fires edit for every module', async () => {
+  it('promoting a member via applyUserChange fires edit for every module', async () => {
     const { member } = await setup();
-    expect(env.auth.levelFor(member.id, 'notes')).toBe('none'); // warms the role cache
     const cb = vi.fn();
     env.auth.onGrantsChanged(cb);
-    env.db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(member.id);
-    env.auth.notifyUserChanged(member.id);
+    env.auth.applyUserChange(member.id, () => {
+      env.db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(member.id);
+    });
     expect(cb).toHaveBeenCalledTimes(2);
     expect(cb).toHaveBeenCalledWith(member.id, 'notes', 'edit');
     expect(cb).toHaveBeenCalledWith(member.id, 'clock', 'edit');
+  });
+
+  it('demoting a cold-cache admin on a fresh createAuth fires the member levels', async () => {
+    const { member, put } = await setup();
+    const adminId = env.auth.listUsers().find((u) => u.role === 'admin')?.id ?? '';
+    // A stored row for the admin only matters after demotion.
+    env.db.prepare("INSERT INTO grants (user_id, module_id, level) VALUES (?, 'notes', 'view')").run(adminId);
+    await put({ userId: member.id, moduleId: 'clock', level: 'view' });
+    const auth2 = fresh();
+    const cb = vi.fn();
+    auth2.onGrantsChanged(cb);
+    auth2.applyUserChange(adminId, () => {
+      env.db.prepare("UPDATE users SET role = 'member' WHERE id = ?").run(adminId);
+    });
+    expect(cb).toHaveBeenCalledTimes(2);
+    expect(cb).toHaveBeenCalledWith(adminId, 'notes', 'view');
+    expect(cb).toHaveBeenCalledWith(adminId, 'clock', 'none');
+  });
+
+  it('disabling a member with grants fires none for each granted module', async () => {
+    const { member, put } = await setup();
+    await put({ userId: member.id, moduleId: 'notes', level: 'edit' });
+    await put({ userId: member.id, moduleId: 'clock', level: 'view' });
+    const auth2 = fresh();
+    const cb = vi.fn();
+    auth2.onGrantsChanged(cb);
+    disableUser({ ...env.deps, applyChange: (id, m) => auth2.applyUserChange(id, m) }, member.id);
+    expect(cb).toHaveBeenCalledTimes(2);
+    expect(cb).toHaveBeenCalledWith(member.id, 'notes', 'none');
+    expect(cb).toHaveBeenCalledWith(member.id, 'clock', 'none');
+    expect(auth2.levelFor(member.id, 'notes')).toBe('none');
+  });
+
+  it('deleting a user with grants removes the rows and fires none', async () => {
+    const { member, put } = await setup();
+    await put({ userId: member.id, moduleId: 'notes', level: 'view' });
+    const cb = vi.fn();
+    env.auth.onGrantsChanged(cb);
+    env.auth.applyUserChange(member.id, () => {
+      env.auth.removeUserGrants(member.id);
+      env.db.prepare('DELETE FROM users WHERE id = ?').run(member.id);
+    });
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith(member.id, 'notes', 'none');
+    expect(env.db.prepare('SELECT COUNT(*) AS n FROM grants').get()).toEqual({ n: 0 });
+    expect(env.auth.levelFor(member.id, 'notes')).toBe('none');
+  });
+
+  it('enabling a disabled member with stored grants fires their levels', async () => {
+    const { member, put } = await setup();
+    await put({ userId: member.id, moduleId: 'notes', level: 'edit' });
+    disableUser(env.deps, member.id);
+    const auth2 = fresh();
+    const cb = vi.fn();
+    auth2.onGrantsChanged(cb);
+    auth2.applyUserChange(member.id, () => {
+      env.db.prepare('UPDATE users SET disabled = 0 WHERE id = ?').run(member.id);
+    });
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith(member.id, 'notes', 'edit');
+  });
+
+  it('a throwing audit still fires the callback', async () => {
+    const { member } = await setup();
+    const auth2 = createAuth(
+      {
+        db: env.db,
+        audit: () => {
+          throw new Error('audit down');
+        },
+        config: loadConfig({ NODE_ENV: 'test' }),
+      },
+      { modules: () => MODULES.map((m) => ({ id: m.id, levels: [...m.levels] })) },
+    );
+    const cb = vi.fn();
+    auth2.onGrantsChanged(cb);
+    const actor = { id: 'x', name: 'x', handle: 'x', role: 'admin' as const };
+    expect(() => auth2.grants.setGrant(actor, { userId: member.id, moduleId: 'notes', level: 'view' })).toThrow('audit down');
+    expect(cb).toHaveBeenCalledWith(member.id, 'notes', 'view');
   });
 
   it('GET /api/me shows the new level after a change; GET /api/admin/grants lists rows', async () => {

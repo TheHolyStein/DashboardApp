@@ -23,8 +23,13 @@ export interface UserDeps {
   now: () => Date;
   /** Called after a user row is inserted (wired to `ensureStarterPage` by the caller). */
   onUserCreated?: ((userId: UserId) => void) | undefined;
-  /** Called after a user is created, changes role, is disabled or deleted (wire to `auth.notifyUserChanged`). */
-  onUserChanged?: ((userId: UserId) => void) | undefined;
+  /** Wrapper around every user mutation (wire to `auth.applyUserChange`); runs `mutate` directly when absent. */
+  applyChange?: ((userId: UserId, mutate: () => void) => void) | undefined;
+}
+
+function applyChange(deps: UserDeps, userId: UserId, mutate: () => void): void {
+  if (deps.applyChange) deps.applyChange(userId, mutate);
+  else mutate();
 }
 
 export interface UserRow extends SessionUser {
@@ -80,11 +85,13 @@ export async function createUser(deps: UserDeps, input: CreateUserInput): Promis
   const passwordHash = await hashPassword(input.password);
   const id = uuidv7(deps.now());
   try {
-    deps.db
-      .prepare(
-        'INSERT INTO users (id, name, handle, role, password_hash, prefs, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
-      )
-      .run(id, name, handle, input.role, passwordHash, JSON.stringify(DEFAULT_PREFS), deps.now().toISOString());
+    applyChange(deps, id, () => {
+      deps.db
+        .prepare(
+          'INSERT INTO users (id, name, handle, role, password_hash, prefs, disabled, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+        )
+        .run(id, name, handle, input.role, passwordHash, JSON.stringify(DEFAULT_PREFS), deps.now().toISOString());
+    });
   } catch (err) {
     if ((err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
       throw new DashError('conflict', 'A user with this name already exists');
@@ -92,7 +99,6 @@ export async function createUser(deps: UserDeps, input: CreateUserInput): Promis
     throw err;
   }
   deps.onUserCreated?.(id);
-  deps.onUserChanged?.(id);
   deps.audit({ userId: id, action: 'user.create', detail: { name, role: input.role } });
   return { id, name, handle, role: input.role };
 }
@@ -149,10 +155,11 @@ export function listUsers(db: BetterSqlite3.Database): SessionUser[] {
 
 /** Disables the user and ends all their sessions. */
 export function disableUser(deps: UserDeps, userId: UserId): void {
-  const res = deps.db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(userId);
-  if (res.changes === 0) throw new DashError('not_found', 'User not found');
+  applyChange(deps, userId, () => {
+    const res = deps.db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(userId);
+    if (res.changes === 0) throw new DashError('not_found', 'User not found');
+  });
   deleteUserSessions(deps.db, userId);
-  deps.onUserChanged?.(userId);
   deps.audit({ userId: null, action: 'user.disable', detail: { target: userId } });
 }
 

@@ -21,7 +21,10 @@ export type { LoginHooks, LoginContext } from './plugin.js';
 export interface CreateAuthOptions {
   now?: () => Date;
   hooks?: { onUserCreated?(userId: UserId): void };
-  /** Modules whose levels `MeDto.grants` reports; empty object when not supplied. */
+  /**
+   * Modules (id and supported levels) that grants and `MeDto.grants` cover. Without it every module is
+   * unknown and `levelFor` returns `none` for everyone, admins included (fail-closed), so the wiring passes it.
+   */
   modules?: () => Array<{ id: ModuleId; levels: ReadonlyArray<'view' | 'edit'> }>;
   /** Internal extension points of the login handler (rate limiting B2, TOTP B3). */
   login?: LoginHooks;
@@ -32,10 +35,8 @@ export interface CreateAuthOptions {
 export type Auth = AuthSeam & {
   loginLimiter: LoginLimiter;
   grants: Grants;
-  /** Drops the cached role of a user (call after create, role change, disable, delete). */
-  invalidateUser: (userId: UserId) => void;
-  /** Invalidates the role cache and fires `onGrantsChanged` for each module whose effective level changed. */
-  notifyUserChanged: (userId: UserId) => void;
+  /** Runs a user mutation, refreshes the role cache and fires `onGrantsChanged` for changed levels. */
+  applyUserChange: (userId: UserId, mutate: () => void) => void;
   removeUserGrants: (userId: UserId) => void;
 };
 
@@ -73,21 +74,23 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
       }
     },
   };
-  // Role cache: only enabled users are cached; invalidate on create, role change, disable and delete.
+  // Role cache: authoritative. Loaded once with every enabled user; a user absent from it has no role
+  // (unknown or disabled). It only changes through `applyUserChange`.
   const roleCache = new Map<UserId, 'admin' | 'member'>();
-  const userRole = (userId: UserId): 'admin' | 'member' | null => {
-    const hit = roleCache.get(userId);
-    if (hit) return hit;
+  const loadRole = (userId: UserId): void => {
     const row = core.db.prepare('SELECT role FROM users WHERE id = ? AND disabled = 0').get(userId) as
       | { role: 'admin' | 'member' }
       | undefined;
-    if (!row) return null;
-    roleCache.set(userId, row.role);
-    return row.role;
+    if (row) roleCache.set(userId, row.role);
+    else roleCache.delete(userId);
   };
-  const invalidateUser = (userId: UserId): void => {
-    roleCache.delete(userId);
-  };
+  for (const r of core.db.prepare('SELECT id, role FROM users WHERE disabled = 0').all() as Array<{
+    id: UserId;
+    role: 'admin' | 'member';
+  }>) {
+    roleCache.set(r.id, r.role);
+  }
+  const userRole = (userId: UserId): 'admin' | 'member' | null => roleCache.get(userId) ?? null;
   const grants = createGrants({
     db: core.db,
     audit: (entry) => core.audit(entry),
@@ -95,11 +98,16 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
     userRole,
     logError: (err) => console.error('onGrantsChanged callback failed', err),
   });
-  /** Invalidates the role cache and fires `onGrantsChanged` for every module whose effective level changed. */
-  const notifyUserChanged = (userId: UserId): void => {
-    const beforeRole = roleCache.get(userId);
-    invalidateUser(userId);
-    grants.notifyUserChanged(userId, beforeRole);
+  /**
+   * The only way users change (create, role change, disable, enable, delete): `mutate` performs the
+   * database change; the role cache is refreshed from the database afterwards and `onGrantsChanged`
+   * fires for every module whose effective level changed. Wire it into `UserDeps.applyChange`.
+   */
+  const applyUserChange = (userId: UserId, mutate: () => void): void => {
+    grants.applyUserChange(userId, () => {
+      mutate();
+      loadRole(userId);
+    });
   };
   const levelFor = grants.levelFor;
 
@@ -113,8 +121,7 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
     listUsers: () => listUsers(core.db),
     loginLimiter,
     grants,
-    invalidateUser,
-    notifyUserChanged,
+    applyUserChange,
     removeUserGrants: grants.removeUserGrants,
   };
 }

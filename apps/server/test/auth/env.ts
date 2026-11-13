@@ -49,7 +49,7 @@ export async function makeAuthEnv(
     webDistDir: mkdtempSync(join(tmpdir(), 'dash-auth-web-')),
     logger: false,
   });
-  const deps: UserDeps = { db, audit, now, onUserChanged: (id) => auth.notifyUserChanged(id) };
+  const deps: UserDeps = { db, audit, now, applyChange: (id, mutate) => auth.applyUserChange(id, mutate) };
   return {
     app,
     db,
