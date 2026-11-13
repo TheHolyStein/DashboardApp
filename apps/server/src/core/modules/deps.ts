@@ -1,6 +1,7 @@
 // Dependency interfaces consumed by the module loader, host factory and router. Later tasks
 // implement them (see the report of task A3); tests in this task use in-test fakes.
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { z } from 'zod';
 import type {
   EventName,
   HostServices,
@@ -10,6 +11,7 @@ import type {
   ModuleManifest,
   ModuleServer,
   Notification,
+  StreamEvent as StreamEventSchema,
   UserId,
 } from '@dash/contract';
 
@@ -59,16 +61,15 @@ export interface Scheduler {
 }
 
 // ---- A7 (copied from the A7 brief, plus sendCore) ------------------------------------------------
-export interface StreamEvent {
-  type: string;
-  data?: unknown;
-}
+/** One message on the live stream (the contract's discriminated union). */
+export type StreamEvent = z.infer<typeof StreamEventSchema>;
 export interface Bus {
   publish(from: ModuleId /* or 'core' */, name: EventName, payload: unknown): void;
   subscribe(moduleId: ModuleId /* or 'core' */, name: EventName, fn: (payload: unknown) => void | Promise<void>): void;
 }
 export interface Stream {
   handle(req: FastifyRequest, reply: FastifyReply): void;
+  /** `snap` is the stored snapshot (`StoredSnapshot` from snapshots.ts); staleness is computed here, at send time. */
   sendSnapshot(moduleId: ModuleId, instanceId: InstanceId | null, snap: unknown): void;
   sendToUser(userId: UserId, ev: StreamEvent): void;
   disconnectUser(userId: UserId, moduleId?: ModuleId): void;
@@ -84,6 +85,17 @@ export type StoreFactory = (moduleId: ModuleId) => Omit<HostServices['store'], '
 
 /** Encrypted per-module secrets (task A6). */
 export type SecretsFactory = (moduleId: ModuleId) => HostServices['secrets'];
+
+/**
+ * Who may see what (A8 provides the real one over pages/instances; A7 ships a table-based one in visibility.ts).
+ * The stream always intersects it with `auth.levelFor(...) !== 'none'` at send time.
+ */
+export interface VisibilityDep {
+  /** Instances on the user's own pages and on shared pages. */
+  visibleInstances(userId: UserId): Array<{ instanceId: InstanceId; moduleId: ModuleId }>;
+  /** Users who can see `instanceId` (or, with null, any instance of the module). */
+  viewersOf(moduleId: ModuleId, instanceId: InstanceId | null): UserId[];
+}
 
 /** Stores a module's snapshot, applies the 256 KB cap, then streams it (task A7). */
 export interface SnapshotsDep {

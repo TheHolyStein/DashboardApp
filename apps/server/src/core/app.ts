@@ -4,7 +4,8 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { CONTRACT_VERSION } from '@dash/contract';
 import type { AppConfig, AuthSeam } from '../seams.js';
 import { errorHandler } from './errors.js';
-import type { LoadedModule } from './modules/deps.js';
+import type { LoadedModule, Scheduler } from './modules/deps.js';
+import { registerStreamRoutes, type StreamService } from './stream.js';
 import { mountModule } from './modules/router.js';
 import { DEFAULT_WEB_DIST, registerStatic } from './static.js';
 
@@ -17,6 +18,9 @@ export interface AppDeps {
   webDistDir?: string;
   /** Fastify logger option; defaults to pino with redaction. Tests pass `false`. */
   logger?: FastifyServerOptions['logger'];
+  /** When both are given, `GET /api/stream` and `POST /api/stream/view` are registered. */
+  stream?: StreamService;
+  scheduler?: Pick<Scheduler, 'markViewed'>;
 }
 
 const BODY_LIMIT = 1024 * 1024;
@@ -63,6 +67,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.get('/api/health', () => ({ ok: true, version: SERVER_VERSION, contract: CONTRACT_VERSION }));
 
   for (const mod of deps.modules) mountModule(app, mod, deps.auth);
+
+  if (deps.stream && deps.scheduler) {
+    registerStreamRoutes(app, { stream: deps.stream, scheduler: deps.scheduler, auth: deps.auth });
+  }
 
   // EXTENSION POINT (later tasks): the other core routes (pages, instances, stream, ...) go here,
   // after auth and module mounting and before static/SPA fallback.
