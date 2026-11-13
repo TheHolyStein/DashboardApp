@@ -21,7 +21,9 @@ export interface TotpDeps {
 }
 
 export interface Totp {
-  /** True when the stored value decrypts to an enabled secret (not merely a pending one). */
+  /** `unreadable`: a stored value that cannot be decrypted or parsed (lost key, corruption). */
+  state(userId: UserId, encrypted: string | null): 'none' | 'pending' | 'enabled' | 'unreadable';
+  /** True for `enabled` and `unreadable` (fail closed: an unverifiable secret still gates sign-in). */
   isEnabled(userId: UserId, encrypted: string | null): boolean;
   /**
    * Checks a login code for an enabled user and, if right and newer than the last accepted step,
@@ -94,7 +96,16 @@ export function createTotp(deps: TotpDeps): Totp {
     'UPDATE users SET totp_last_step = ? WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)',
   );
   return {
-    isEnabled: (userId, enc) => open(userId, enc)?.state === 'active',
+    state(userId, enc) {
+      if (enc === null || enc === '') return 'none';
+      const s = open(userId, enc);
+      if (!s) return 'unreadable';
+      return s.state === 'active' ? 'enabled' : 'pending';
+    },
+    isEnabled(userId, enc) {
+      const st = this.state(userId, enc);
+      return st === 'enabled' || st === 'unreadable';
+    },
     verifyLogin(userId, enc, code) {
       const s = open(userId, enc);
       if (s?.state !== 'active') return false;

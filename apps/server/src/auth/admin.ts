@@ -67,7 +67,7 @@ export async function checkOwnPassword(c: AuthRouteCtx, userId: UserId, password
   if (!reservation.allowed) throw new RateLimitedError(reservation.retryAfterSec);
   const row = findUserById(c.db, userId);
   const ok = row ? await c.verify(row.passwordHash, password) : false;
-  if (!ok) throw new DashError('forbidden', 'Incorrect password');
+  if (!ok) throw new DashError('forbidden', 'Incorrect password', { reason: 'wrong_password' });
   const settled = c.limiter.recordSuccess(reservation.ticket);
   if (!settled.allowed) throw new RateLimitedError(settled.retryAfterSec);
 }

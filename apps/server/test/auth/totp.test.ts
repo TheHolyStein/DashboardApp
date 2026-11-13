@@ -149,7 +149,9 @@ describe('totp', () => {
 
   it('disabling TOTP needs the correct password; afterwards no code is needed', async () => {
     const { e, s } = await enabled();
-    expect((await post(e, s, '/api/me/totp/disable', { password: 'not the password!' })).statusCode).toBe(403);
+    const wrongPw = await post(e, s, '/api/me/totp/disable', { password: 'not the password!' });
+    expect(wrongPw.statusCode).toBe(403);
+    expect(wrongPw.json<{ error: { details: unknown } }>().error.details).toEqual({ reason: 'wrong_password' });
     expect((await attempt(e, { name: 'Alice', password: PASSWORD })).statusCode).toBe(422);
     expect((await post(e, s, '/api/me/totp/disable', { password: PASSWORD })).statusCode).toBe(204);
     expect((await e.login('Alice')).res.statusCode).toBe(200);
@@ -174,5 +176,79 @@ describe('totp', () => {
     const actions = (e.db.prepare("SELECT action, detail FROM audit_log WHERE action LIKE 'auth.totp.%'").all() as Array<{ action: string; detail: string | null }>);
     expect(actions.map((a) => a.action)).toEqual(expect.arrayContaining(['auth.totp.enable', 'auth.totp.reset']));
     expect(JSON.stringify(actions)).not.toContain(secret);
+  });
+
+  describe('unreadable stored secret fails closed', () => {
+    const scramble = (e: AuthEnv, id: string): void => {
+      e.db.prepare('UPDATE users SET totp_secret_enc = ? WHERE id = ?').run(Buffer.alloc(64, 7).toString('base64'), id);
+    };
+
+    it('scrambled ciphertext: correct password never yields a session, with or without a totp field', async () => {
+      const { e, alice, secret } = await enabled();
+      scramble(e, alice.id);
+      e.clock.now = new Date(e.clock.now.getTime() + 60_000);
+      const without = await attempt(e, { name: 'Alice', password: PASSWORD });
+      expect(without.statusCode).toBe(401);
+      expect(without.headers['set-cookie']).toBeUndefined();
+      expect(without.body).not.toContain('totpRequired');
+      const withCode = await attempt(e, { name: 'Alice', password: PASSWORD, totp: code(secret, e.clock.now) });
+      expect(withCode.statusCode).toBe(401);
+      expect(withCode.headers['set-cookie']).toBeUndefined();
+      expect(e.db.prepare("SELECT user_id FROM audit_log WHERE action = 'auth.totp.unreadable'").get()).toEqual({ user_id: alice.id });
+      expect(e.db.prepare("SELECT count FROM login_attempts WHERE key = 'user:alice'").get()).toEqual({ count: 2 });
+    });
+
+    it('a different server key on a fresh createAuth over the same database also refuses', async () => {
+      const { e, secret } = await enabled();
+      const { createAuth } = await import('../../src/auth/index.ts');
+      const { buildApp } = await import('../../src/core/app.ts');
+      const { createAudit } = await import('../../src/core/audit.ts');
+      const { mkdtempSync } = await import('node:fs');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const { loadConfig } = await import('../../src/core/config.ts');
+      const now = (): Date => e.clock.now;
+      const config = loadConfig({ NODE_ENV: 'test' });
+      const auth2 = createAuth({ db: e.db, audit: createAudit(e.db, now), config }, { now, secretKey: Buffer.alloc(32, 9) });
+      const app2 = await buildApp({ config, db: e.db, auth: auth2, modules: [], webDistDir: mkdtempSync(join(tmpdir(), 'dash-auth-web-')), logger: false });
+      try {
+        const r = await app2.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          headers: json,
+          payload: { name: 'Alice', password: PASSWORD, totp: code(secret, e.clock.now) },
+        });
+        expect(r.statusCode).toBe(401);
+        expect(r.headers['set-cookie']).toBeUndefined();
+      } finally {
+        await app2.close();
+      }
+    });
+
+    it('admin list shows totpEnabled true; setup/enable are 409; reset lets the password alone sign in', async () => {
+      const { e, alice, s } = await enabled();
+      scramble(e, alice.id);
+      await e.addUser('Root', 'admin');
+      const root = await e.login('Root');
+      const list = await e.app.inject({ method: 'GET', url: '/api/admin/users', headers: { cookie: root.cookie } });
+      expect(list.json<Array<{ name: string; totpEnabled: boolean }>>().find((u) => u.name === 'Alice')?.totpEnabled).toBe(true);
+      expect((await post(e, s, '/api/me/totp/setup', {})).statusCode).toBe(409);
+      expect((await post(e, s, '/api/me/totp/enable', { code: '123456' })).statusCode).toBe(409);
+      const reset = await e.app.inject({
+        method: 'PATCH',
+        url: `/api/admin/users/${alice.id}`,
+        headers: { cookie: root.cookie, 'x-csrf': root.csrf, ...json },
+        payload: { resetTotp: true },
+      });
+      expect(reset.statusCode).toBe(200);
+      expect((await e.login('Alice')).res.statusCode).toBe(200);
+    });
+
+    it('disable with the correct password removes an unreadable value', async () => {
+      const { e, alice, s } = await enabled();
+      scramble(e, alice.id);
+      expect((await post(e, s, '/api/me/totp/disable', { password: PASSWORD })).statusCode).toBe(204);
+      expect((await e.login('Alice')).res.statusCode).toBe(200);
+    });
   });
 });

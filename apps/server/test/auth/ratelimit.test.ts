@@ -257,4 +257,27 @@ describe('login rate limiting', () => {
       expect(rows(e).every((r) => r.locked_until === null)).toBe(true);
     });
   });
+
+describe('release', () => {
+  it('refunds only its own reservation and never unlocks a key locked by another request', async () => {
+    const { env: e } = await setup();
+    const lim = e.auth.loginLimiter;
+    const count = () => (e.db.prepare("SELECT count FROM login_attempts WHERE key = 'user:rel'").get() as { count: number }).count;
+    const mine = lim.reserve(['user:rel']);
+    if (!mine.allowed) throw new Error('unexpected');
+    lim.reserve(['user:rel']);
+    lim.reserve(['user:rel']);
+    expect(count()).toBe(3);
+    lim.release(mine.ticket);
+    expect(count()).toBe(2);
+    // Two more reservations by other requests: the 5th counted attempt locks the key.
+    const mine2 = lim.reserve(['user:rel']);
+    if (!mine2.allowed) throw new Error('unexpected');
+    lim.reserve(['user:rel']);
+    lim.reserve(['user:rel']);
+    expect(lim.check(['user:rel']).allowed).toBe(false);
+    lim.release(mine2.ticket);
+    expect(lim.check(['user:rel']).allowed).toBe(false);
+  });
+});
 });

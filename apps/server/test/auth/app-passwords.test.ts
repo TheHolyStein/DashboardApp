@@ -103,7 +103,7 @@ describe('app passwords', () => {
     expect(counter.n).toBe(after1 + 1);
   });
 
-  it('deleted app password stops working, even from the cache', async () => {
+  it('deleted app password stops working', async () => {
     const { e, s, id, password } = await setup();
     expect(e.auth.verifyAppPassword(basic('Alice', password))).not.toBeNull();
     const del = await e.app.inject({ method: 'DELETE', url: `/api/me/app-passwords/${id}`, headers: { cookie: s.cookie, 'x-csrf': s.csrf } });

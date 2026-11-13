@@ -159,6 +159,7 @@ describe('admin users', () => {
     const b = await e.login('Mia');
     const wrong = await call(e, a, 'POST', '/api/me/password', { current: 'not the password!', next: 'another good password' });
     expect(wrong.statusCode).toBe(403);
+    expect(wrong.json<{ error: { code: string; details: unknown } }>().error).toMatchObject({ code: 'forbidden', details: { reason: 'wrong_password' } });
     expect((await call(e, a, 'POST', '/api/me/password', { current: PASSWORD, next: 'short' })).statusCode).toBe(422);
     expect((await call(e, null, 'POST', '/api/me/password', { current: PASSWORD, next: 'another good password' }, { cookie: a.cookie })).statusCode).toBe(403);
     const ok = await call(e, a, 'POST', '/api/me/password', { current: PASSWORD, next: 'another good password' });

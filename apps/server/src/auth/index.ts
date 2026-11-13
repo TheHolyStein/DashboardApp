@@ -78,6 +78,13 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
       const ticket = ctx.state[TICKET] as AttemptTicket | undefined;
       // Two-factor step: only after the password verified (a wrong password never reveals whether TOTP is on).
       if (ctx.passwordOk && ctx.user && totp.isEnabled(ctx.user.id, ctx.user.totpSecretEnc)) {
+        if (totp.state(ctx.user.id, ctx.user.totpSecretEnc) === 'unreadable') {
+          // Fail closed: the user has 2FA but the secret cannot be read; never sign in with the password alone.
+          // Admin `resetTotp` is the recovery path.
+          console.error(`TOTP secret of user ${ctx.user.id} is unreadable (lost key or corruption); sign-in refused`);
+          core.audit({ userId: ctx.user.id, action: 'auth.totp.unreadable', ip: ctx.ip });
+          throw new DashError('unauthenticated', 'Invalid name or password');
+        }
         if (ctx.totp === undefined || ctx.totp === '') {
           // Asking for the code is not a failed attempt: refund the reservation.
           if (ticket) loginLimiter.release(ticket);
