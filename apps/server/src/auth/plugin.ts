@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DashError, type ModuleId, type PermissionLevel } from '@dash/contract';
 import type { CoreSeam, SessionUser } from '../seams.js';
 import { parseWith, requireCsrf } from '../core/csrf.js';
+import { clientIp, RateLimitedError } from './ratelimit.js';
 import {
   clearedCookie,
   createSession,
@@ -61,6 +62,8 @@ export interface AuthPluginOpts {
   levelFor(userId: string, moduleId: ModuleId): PermissionLevel;
   modules?: (() => Array<{ id: ModuleId; levels: ReadonlyArray<'view' | 'edit'> }>) | undefined;
   login?: LoginHooks | undefined;
+  /** Replaces argon2 verification (tests count calls). */
+  verifyPassword?: typeof verifyPassword | undefined;
 }
 
 const UNAUTH_MESSAGE = 'Invalid name or password';
@@ -91,6 +94,7 @@ function getDummyHash(): Promise<string> {
 
 export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
   const { core, now } = opts;
+  const verify = opts.verifyPassword ?? verifyPassword;
   const db = core.db;
 
   const toMe = (user: SessionUser, csrf: string): Me => {
@@ -128,30 +132,36 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
         throw new DashError('invalid', 'Content-Type must be application/json');
       }
       const body = parseWith(LoginBody, req.body);
-      const ctx: LoginContext = { name: body.name, ip: req.ip, totp: body.totp };
+      const ip = clientIp(req);
+      const ctx: LoginContext = { name: body.name, ip, totp: body.totp };
       const attempted = body.name.slice(0, 64);
 
-      await opts.login?.preCheck?.(ctx);
+      try {
+        await opts.login?.preCheck?.(ctx);
+      } catch (err) {
+        if (err instanceof RateLimitedError) void reply.header('Retry-After', String(err.retryAfterSec));
+        throw err;
+      }
 
       const found = findUserByName(db, body.name.trim());
       const user = found && !found.disabled ? found : null;
-      const passwordOk = await verifyPassword(user ? user.passwordHash : await getDummyHash(), body.password);
+      const passwordOk = await verify(user ? user.passwordHash : await getDummyHash(), body.password);
       const ok = user !== null && passwordOk;
 
       try {
         await opts.login?.onResult?.({ ...ctx, user: ok ? user : null, passwordOk: ok });
       } catch (err) {
-        core.audit({ userId: user?.id ?? null, action: 'auth.login.failure', detail: { name: attempted }, ip: req.ip });
+        core.audit({ userId: user?.id ?? null, action: 'auth.login.failure', detail: { name: attempted }, ip });
         throw err;
       }
       if (!ok) {
-        core.audit({ userId: null, action: 'auth.login.failure', detail: { name: attempted }, ip: req.ip });
+        core.audit({ userId: null, action: 'auth.login.failure', detail: { name: attempted }, ip });
         throw new DashError('unauthenticated', UNAUTH_MESSAGE);
       }
 
       const ua = req.headers['user-agent'];
-      const { sid, csrf } = createSession(db, user.id, now(), { ua: typeof ua === 'string' ? ua : undefined, ip: req.ip });
-      core.audit({ userId: user.id, action: 'auth.login.success', ip: req.ip });
+      const { sid, csrf } = createSession(db, user.id, now(), { ua: typeof ua === 'string' ? ua : undefined, ip });
+      core.audit({ userId: user.id, action: 'auth.login.success', ip });
       void reply.header('Set-Cookie', sessionCookie(sid));
       return toMe(user, csrf);
     });
@@ -161,7 +171,7 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
       requireCsrf(req);
       const sid = readSidCookie(req.headers.cookie);
       if (sid) deleteSession(db, hashSid(sid));
-      core.audit({ userId: user.id, action: 'auth.logout', ip: req.ip });
+      core.audit({ userId: user.id, action: 'auth.logout', ip: clientIp(req) });
       void reply.header('Set-Cookie', clearedCookie());
       return reply.status(204).send();
     });

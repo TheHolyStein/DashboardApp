@@ -8,16 +8,16 @@ import { buildApp } from '../../src/core/app.ts';
 import { loadConfig } from '../../src/core/config.ts';
 import { openDb } from '../../src/core/db.ts';
 import { migrateCore } from '../../src/core/migrate.ts';
-import { createAuth } from '../../src/auth/index.ts';
+import { createAuth, type CreateAuthOptions } from '../../src/auth/index.ts';
 import { createUser, type UserDeps } from '../../src/auth/users.ts';
-import type { AuthSeam, SessionUser } from '../../src/seams.ts';
+import type { SessionUser } from '../../src/seams.ts';
 
 export const PASSWORD = 'correct horse battery';
 
 export interface AuthEnv {
   app: FastifyInstance;
   db: BetterSqlite3.Database;
-  auth: AuthSeam;
+  auth: ReturnType<typeof createAuth>;
   deps: UserDeps;
   /** Mutable injected clock. */
   clock: { now: Date };
@@ -29,7 +29,7 @@ export interface AuthEnv {
 
 /** App with the real auth plugin over an in-memory database. Call `app.close()` afterwards. */
 export async function makeAuthEnv(
-  opts: { modules?: Array<{ id: string; levels: ReadonlyArray<'view' | 'edit'> }>; start?: string } = {},
+  opts: { modules?: Array<{ id: string; levels: ReadonlyArray<'view' | 'edit'> }>; start?: string; auth?: CreateAuthOptions } = {},
 ): Promise<AuthEnv> {
   const db = openDb(':memory:');
   migrateCore(db);
@@ -39,7 +39,7 @@ export async function makeAuthEnv(
   const audit = createAudit(db, now);
   const auth = createAuth(
     { db, audit, config },
-    { now, ...(opts.modules ? { modules: () => opts.modules ?? [] } : {}) },
+    { now, ...(opts.modules ? { modules: () => opts.modules ?? [] } : {}), ...opts.auth },
   );
   const app = await buildApp({
     config,

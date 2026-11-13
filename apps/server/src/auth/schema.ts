@@ -60,4 +60,6 @@ export const loginAttempts = sqliteTable('login_attempts', {
   count: integer('count').notNull().default(0),
   windowStart: text('window_start').notNull(),
   lockedUntil: text('locked_until'),
+  lockLevel: integer('lock_level').notNull().default(0), // next lock lasts 15 min * 2^level (cap 24 h)
+  lastFailureAt: text('last_failure_at'), // lock level decays 24 h after this
 });
