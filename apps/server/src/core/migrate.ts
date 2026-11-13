@@ -124,6 +124,10 @@ export function assertMigrationScope(moduleId: ModuleId, migration: Migration): 
   assertWriteScope(moduleId, tokenize(migration.up, fail), fail);
 }
 
+/** `ON DELETE|UPDATE <CASCADE|SET|NO|RESTRICT>` in a foreign key clause is not a statement. */
+const isFkAction = (prev: Token | undefined, next: Token | undefined): boolean =>
+  isWord(prev, 'ON') && isWord(next, 'CASCADE', 'SET', 'NO', 'RESTRICT');
+
 /** Write-scope scan over an already tokenized statement list (see assertMigrationScope). */
 export function assertWriteScope(
   moduleId: ModuleId,
@@ -217,6 +221,7 @@ export function assertWriteScope(
         break;
       case 'UPDATE': // not a statement after DO (upsert) or in a trigger header ("UPDATE [OF cols] ON t")
         if (isWord(prev, 'DO') || isWord(toks[i + 1], 'ON', 'OF')) break;
+        if (isFkAction(prev, toks[i + 1])) break;
         {
           let j = i + 1;
           if (isWord(toks[j], 'OR')) j += 2;
@@ -225,6 +230,7 @@ export function assertWriteScope(
         break;
       case 'DELETE':
         if (isWord(toks[i + 1], 'ON')) break; // trigger header
+        if (isFkAction(prev, toks[i + 1])) break;
         if (!isWord(toks[i + 1], 'FROM')) {
           fail('DELETE is not followed by FROM');
           break;

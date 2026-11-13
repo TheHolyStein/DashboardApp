@@ -35,6 +35,11 @@ describe('migrateModule scope scan: bypass attempts are rejected', () => {
     ['ATTACH DATABASE "x.db" AS x'],
     ['PRAGMA writable_schema = 1'],
     ['CREATE TRIGGER m_news_t AFTER INSERT ON m_news_a BEGIN DELETE FROM kv; END'],
+    // the foreign-key-action skip must not hide a real statement that follows
+    ['CREATE TABLE m_news_c (a REFERENCES m_news_a(x) ON DELETE CASCADE); DELETE FROM kv;'],
+    ['CREATE TABLE m_news_c (a REFERENCES m_news_a(x) ON UPDATE CASCADE); UPDATE kv SET value = 1;'],
+    ['CREATE TABLE m_news_c (a REFERENCES m_news_a(x) ON DELETE SET NULL); DROP TABLE kv;'],
+    ['CREATE TABLE m_news_c (a REFERENCES m_news_a(x) ON DELETE kv)'],
   ])('rejects %s', (sql) => {
     const db = memDb();
     db.exec('CREATE TABLE m_news_a (x)');
@@ -42,6 +47,32 @@ describe('migrateModule scope scan: bypass attempts are rejected', () => {
       expect.objectContaining({ code: 'invalid' }),
     );
     expect(tables(db)).toContain('kv');
+  });
+});
+
+describe('migrateModule scope scan: foreign-key actions', () => {
+  it.each([
+    ['ON DELETE CASCADE'],
+    ['ON DELETE SET NULL'],
+    ['ON DELETE SET DEFAULT'],
+    ['ON DELETE NO ACTION'],
+    ['ON DELETE RESTRICT'],
+    ['ON UPDATE CASCADE'],
+    ['ON UPDATE RESTRICT'],
+    ['ON UPDATE CASCADE ON DELETE SET NULL'],
+    ['ON DELETE NO ACTION ON UPDATE RESTRICT'],
+    ['on update no action on delete cascade'],
+    ['On Delete Set Default On Update Cascade'],
+  ])('accepts %s', (action) => {
+    const db = memDb();
+    migrateModule(db, 'news', [
+      {
+        id: 1,
+        up: `CREATE TABLE m_news_b (id INTEGER PRIMARY KEY);
+             CREATE TABLE m_news_c (id INTEGER PRIMARY KEY, b INTEGER DEFAULT 0 REFERENCES m_news_b(id) ${action});`,
+      },
+    ]);
+    expect(tables(db)).toContain('m_news_c');
   });
 });
 
