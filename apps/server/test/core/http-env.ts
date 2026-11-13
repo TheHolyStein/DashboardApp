@@ -1,10 +1,5 @@
 // Local throwaway servers and injected DNS for host.http tests: nothing touches the real network.
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
 import http from 'node:http';
-import https from 'node:https';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type dns from 'node:dns';
 import type { ModuleManifest, OutboundRule } from '@dash/contract';
@@ -21,7 +16,6 @@ export interface TestServer {
 
 export async function startServer(
   handler: (req: http.IncomingMessage, res: http.ServerResponse, n: number) => void,
-  tls?: { key: string; cert: string },
 ): Promise<TestServer> {
   const hits: http.IncomingMessage[] = [];
   const sockets = new Set<import('node:net').Socket>();
@@ -29,8 +23,8 @@ export async function startServer(
     hits.push(req);
     handler(req, res, hits.length);
   };
-  const server = tls ? https.createServer(tls, onReq) : http.createServer(onReq);
-  server.on(tls ? 'secureConnection' : 'connection', (s: import('node:net').Socket) => {
+  const server = http.createServer(onReq);
+  server.on('connection', (s: import('node:net').Socket) => {
     sockets.add(s);
     s.on('close', () => sockets.delete(s));
   });
@@ -48,11 +42,19 @@ export async function startServer(
 }
 
 /** Fake DNS: maps hostnames to address lists; counts lookups. */
-export function fakeLookup(map: Record<string, string[]>): typeof dns.lookup & { calls: string[] } {
+export function fakeLookup(
+  map: Record<string, string[]>,
+  delays: Record<string, number> = {},
+): typeof dns.lookup & { calls: string[] } {
   const calls: string[] = [];
   const fn = (host: string, _o: unknown, cb: (e: Error | null, r: unknown) => void): void => {
     calls.push(host);
     const list = map[host];
+    const late = delays[host];
+    if (late) {
+      setTimeout(() => cb(null, (list ?? []).map((address) => ({ address, family: 4 }))), late);
+      return;
+    }
     if (!list) {
       cb(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }), []);
       return;
@@ -79,10 +81,11 @@ export function makeHttp(opts: {
   dns?: Record<string, string[]>;
   port?: number;
   lan?: string[];
+  lookupDelays?: Record<string, number>;
 }): HttpEnv {
   const db = openDb(':memory:');
   migrateCore(db);
-  const lookup = fakeLookup(opts.dns ?? {});
+  const lookup = fakeLookup(opts.dns ?? {}, opts.lookupDelays);
   const clock = { t: Date.parse('2026-11-12T10:00:00.000Z') };
   const h = createHttp('demo', manifestWith(...opts.outbound), {
     db,
@@ -92,15 +95,4 @@ export function makeHttp(opts: {
     ...(opts.port !== undefined ? { connect: (t) => ({ address: '127.0.0.1', port: opts.port ?? t.port }) } : {}),
   });
   return { db, http: h, lookup, clock };
-}
-
-/** Self-signed key/cert via the openssl CLI; null when openssl is unavailable. */
-export function selfSigned(): { key: string; cert: string } | null {
-  try {
-    const dir = mkdtempSync(join(tmpdir(), 'dash-tls-'));
-    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'k.pem'), '-out', join(dir, 'c.pem'), '-days', '2', '-subj', '/CN=feed.example'], { stdio: 'ignore' });
-    return { key: readFileSync(join(dir, 'k.pem'), 'utf8'), cert: readFileSync(join(dir, 'c.pem'), 'utf8') };
-  } catch {
-    return null;
-  }
 }

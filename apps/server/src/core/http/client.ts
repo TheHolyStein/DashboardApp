@@ -10,6 +10,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { DashError, type HostServices, type HttpOptions, type HttpResult, type ModuleId, type ModuleManifest } from '@dash/contract';
 import { cacheKey, readCache, refreshCache, writeCache } from './cache.ts';
 import { checkAddresses, checkUrl, effectivePort, urlHostname, type Rule } from './guard.ts';
+import { decideRedirect, REDIRECT_STATUSES } from './redirect.ts';
 
 export { classifyAddress } from './guard.ts';
 export { purgeExpiredCache } from './cache.ts';
@@ -36,12 +37,17 @@ const DEFAULT_TIMEOUT = 10_000;
 const MAX_TIMEOUT = 30_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
 const MAX_MAX_BYTES = 20_000_000;
-const MAX_REDIRECTS = 3;
 const STRIPPED = new Set(['cookie', 'host', 'content-length', 'transfer-encoding', 'connection', 'accept-encoding']);
 const KEY_HEADERS = new Set(['accept', 'accept-language', 'authorization']);
 
 interface State {
   req?: http.ClientRequest;
+  /** Aborted by the total deadline: nothing new may start once it fires. */
+  ctrl: AbortController;
+}
+
+function assertLive(st: State): void {
+  if (st.ctrl.signal.aborted) throw upstream('Request timed out');
 }
 
 function upstream(msg: string): DashError {
@@ -85,6 +91,10 @@ interface Hop {
 
 function requestOnce(hop: Hop, deps: HttpDeps, st: State): Promise<http.IncomingMessage> {
   return new Promise((resolve, reject) => {
+    if (st.ctrl.signal.aborted) {
+      reject(upstream('Request timed out'));
+      return;
+    }
     const { url } = hop;
     const isHttps = url.protocol === 'https:';
     const hostname = urlHostname(url);
@@ -107,6 +117,7 @@ function requestOnce(hop: Hop, deps: HttpDeps, st: State): Promise<http.Incoming
     if (isHttps && !isIP(hostname)) options.servername = hostname;
     const req = (isHttps ? https : http).request(options, resolve);
     st.req = req;
+    st.ctrl.signal.addEventListener('abort', () => req.destroy(), { once: true });
     req.on('error', (e) => reject(upstream(errMessage(e))));
     req.end(hop.body === undefined ? undefined : Buffer.from(hop.body));
   });
@@ -202,10 +213,11 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
     if (stale?.etag) headers['if-none-match'] = stale.etag;
     let body: Uint8Array | undefined = typeof opts.body === 'string' ? Buffer.from(opts.body) : opts.body;
     let hopMethod = method;
-    const originHost = urlHostname(url).toLowerCase();
 
     for (let hops = 0; ; hops++) {
+      assertLive(st);
       const addrs = await resolveAll(deps.lookup, urlHostname(url));
+      assertLive(st);
       checkAddresses(rule, addrs.map((a) => a.address));
       const chosen = addrs[0]!;
       const res = await requestOnce(
@@ -213,32 +225,21 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
         deps,
         st,
       );
+      assertLive(st);
       const status = res.statusCode ?? 0;
       const location = res.headers.location;
-      if ([301, 302, 303, 307, 308].includes(status) && location) {
+      if (REDIRECT_STATUSES.includes(status) && location) {
         res.destroy();
         st.req?.destroy();
-        if (hops >= MAX_REDIRECTS) throw upstream('Too many redirects');
-        let next: URL;
-        try {
-          next = new URL(location, url);
-        } catch {
-          throw upstream('Invalid redirect');
-        }
-        if (url.protocol === 'https:' && next.protocol === 'http:') {
-          throw new DashError('forbidden', 'Redirect from https to http is not allowed');
-        }
+        const d = decideRedirect({ current: url, status, location, rule, hops });
+        const next = d.url;
         checkUrl(next, rule, manifest, devices);
-        const nextHost = urlHostname(next).toLowerCase();
-        if (rule === 'host' && nextHost !== originHost) {
-          throw new DashError('forbidden', 'Redirect to a different host is not allowed');
-        }
-        if (nextHost !== urlHostname(url).toLowerCase()) {
+        if (d.scrubHeaders) {
           for (const k of Object.keys(headers)) {
             if (k !== 'user-agent' && k !== 'accept-encoding') delete headers[k];
           }
         }
-        if (status !== 307 && status !== 308) {
+        if (!d.preserveMethodAndBody) {
           hopMethod = 'GET';
           body = undefined;
           delete headers['content-type'];
@@ -248,6 +249,7 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
       }
       const respHeaders = cleanHeaders(res.headers);
       if (status === 304 && stale) {
+        assertLive(st);
         res.destroy();
         st.req?.destroy();
         refreshCache(deps.db, key, new Date(now().getTime() + ttl * 1000).toISOString());
@@ -260,6 +262,7 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
         res.destroy();
         st.req?.destroy();
       }
+      assertLive(st);
       if (cacheable && status === 200) {
         writeCache(deps.db, {
           key,
@@ -277,10 +280,11 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
   return {
     async fetch<T = unknown>(url: string, opts: HttpOptions = {}): Promise<HttpResult<T>> {
       const timeoutMs = Math.min(Math.max(opts.timeoutMs ?? DEFAULT_TIMEOUT, 1), MAX_TIMEOUT);
-      const st: State = {};
+      const st: State = { ctrl: new AbortController() };
       let timer: NodeJS.Timeout | undefined;
       const deadline = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
+          st.ctrl.abort();
           st.req?.destroy();
           reject(upstream('Request timed out'));
         }, timeoutMs);
@@ -291,6 +295,7 @@ export function createHttp(moduleId: ModuleId, manifest: ModuleManifest, deps: H
         const r = await Promise.race([work, deadline]);
         return { status: r.status, headers: r.headers, data: shape<T>(r.body, opts.as ?? 'json'), fromCache: r.fromCache };
       } catch (e) {
+        st.ctrl.abort();
         st.req?.destroy();
         if (e instanceof DashError) throw e;
         throw upstream(errMessage(e));

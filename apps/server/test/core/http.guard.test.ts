@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { classifyAddress } from '../../src/core/http/guard.ts';
-import { makeHttp, selfSigned, startServer, type TestServer } from './http-env.ts';
+import { decideRedirect } from '../../src/core/http/redirect.ts';
+import { makeHttp, startServer, type TestServer } from './http-env.ts';
 
 let srv: TestServer | undefined;
 afterEach(async () => {
@@ -99,24 +100,6 @@ describe('host.http guard', () => {
     expect(srv.hits.length).toBe(4);
   });
 
-  it('redirect from https to http is forbidden', async () => {
-    const tls = selfSigned();
-    if (!tls) return;
-    srv = await startServer((_q, res) => {
-      res.writeHead(302, { location: 'http://feed.example/' }).end();
-    }, tls);
-    const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    try {
-      const e = makeHttp({ outbound: [{ kind: 'publicUrl' }], ...PUBLIC, port: srv.port });
-      await expect(e.http.fetch('https://feed.example/', { rule: 'publicUrl' })).rejects.toMatchObject(forbidden);
-      expect(srv.hits.length).toBe(1);
-    } finally {
-      if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-    }
-  });
-
   it('Authorization is dropped on cross-host redirect', async () => {
     srv = await startServer((q, res) => {
       if (q.headers.host === 'a.example') res.writeHead(302, { location: 'http://b.example/y' }).end();
@@ -172,5 +155,31 @@ describe('host.http guard', () => {
   it('publicUrl on port 22 → forbidden', async () => {
     const e = makeHttp({ outbound: [{ kind: 'publicUrl' }], ...PUBLIC });
     await expect(e.http.fetch('http://feed.example:22/', { rule: 'publicUrl' })).rejects.toMatchObject(forbidden);
+  });
+
+  it('redirect from https to http is forbidden', () => {
+    const cur = new URL('https://feed.example/a');
+    expect(() => decideRedirect({ current: cur, status: 302, location: 'http://feed.example/b', rule: 'publicUrl', hops: 0 })).toThrow(
+      expect.objectContaining(forbidden),
+    );
+    // http -> https is fine
+    expect(decideRedirect({ current: new URL('http://feed.example/a'), status: 302, location: 'https://feed.example/b', rule: 'publicUrl', hops: 0 }).url.href).toBe('https://feed.example/b');
+  });
+
+  it('redirect decision: hop limit, method rules, host rule, origin scrub', () => {
+    const cur = new URL('https://feed.example/a');
+    const d = (status: number, location: string, rule: 'host' | 'publicUrl' = 'publicUrl', hops = 0) =>
+      decideRedirect({ current: cur, status, location, rule, hops });
+    expect(() => d(302, '/x', 'publicUrl', 3)).toThrow(expect.objectContaining({ code: 'upstream' }));
+    expect(d(302, '/x', 'publicUrl', 2).url.href).toBe('https://feed.example/x');
+    expect(d(307, '/x').preserveMethodAndBody).toBe(true);
+    expect(d(308, '/x').preserveMethodAndBody).toBe(true);
+    expect(d(301, '/x').preserveMethodAndBody).toBe(false);
+    expect(d(303, '/x').preserveMethodAndBody).toBe(false);
+    expect(() => d(302, 'https://other.example/', 'host')).toThrow(expect.objectContaining(forbidden));
+    expect(d(302, '/x').scrubHeaders).toBe(false);
+    expect(d(302, 'https://other.example/').scrubHeaders).toBe(true);
+    expect(d(302, 'https://feed.example:8443/').scrubHeaders).toBe(true);
+    expect(decideRedirect({ current: new URL('http://feed.example/'), status: 302, location: 'https://feed.example/', rule: 'publicUrl', hops: 0 }).scrubHeaders).toBe(true);
   });
 });

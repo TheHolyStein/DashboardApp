@@ -91,4 +91,35 @@ describe('host.http limits', () => {
     expect(r.data).toBe('boom');
     expect(r.headers['x-thing']).toBe('A');
   });
+
+  it('deadline during a slow DNS lookup leaves no connection open', async () => {
+    srv = await startServer((_q, res) => {
+      res.writeHead(200);
+      const t = setInterval(() => res.write(' '), 20);
+      res.on('close', () => clearInterval(t));
+    });
+    const e = makeHttp({ outbound: [{ kind: 'publicUrl' }], dns: DNS, port: srv.port, lookupDelays: { 'feed.example': 250 } });
+    await expect(e.http.fetch(URL_, { rule: 'publicUrl', timeoutMs: 100 })).rejects.toMatchObject({ code: 'upstream' });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(srv.hits.length).toBe(0);
+    expect(srv.sockets.size).toBe(0);
+  });
+
+  it('deadline during a redirect chain writes no cache row', async () => {
+    srv = await startServer((q, res) => {
+      if (q.url === '/a') res.writeHead(302, { location: 'http://b.example/b' }).end();
+      else res.end('{"v":1}');
+    });
+    const e = makeHttp({
+      outbound: [{ kind: 'publicUrl' }],
+      dns: { 'feed.example': ['93.184.216.34'], 'b.example': ['93.184.216.35'] },
+      port: srv.port,
+      lookupDelays: { 'b.example': 250 },
+    });
+    await expect(e.http.fetch('http://feed.example/a', { rule: 'publicUrl', ttlSec: 60, timeoutMs: 100 })).rejects.toMatchObject({ code: 'upstream' });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(srv.hits.length).toBe(1);
+    expect(e.db.prepare('SELECT count(*) AS n FROM http_cache').get()).toEqual({ n: 0 });
+    expect(srv.sockets.size).toBe(0);
+  });
 });
