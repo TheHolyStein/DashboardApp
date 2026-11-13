@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BinaryResponse,
@@ -9,6 +8,7 @@ import {
 } from '@dash/contract';
 import type { AuthSeam, SessionUser } from '../../seams.js';
 import type { LoadedModule } from './deps.js';
+import { requireCsrf } from '../csrf.js';
 import { ROOT_MOUNT_ALLOW } from './loader.js';
 
 type Handler = (req: RouteRequest) => Promise<unknown>;
@@ -17,7 +17,6 @@ type RawHandler = Parameters<ModuleRouter['raw']>[1];
 const WEBDAV_METHODS = [
   'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'REPORT', 'MKCALENDAR', 'SEARCH',
 ];
-const SAFE_METHODS = new Set(['GET', 'HEAD']);
 
 function headersOf(request: FastifyRequest): Record<string, string> {
   const out: Record<string, string> = {};
@@ -25,21 +24,6 @@ function headersOf(request: FastifyRequest): Record<string, string> {
     if (v !== undefined) out[k] = Array.isArray(v) ? v.join(', ') : v;
   }
   return out;
-}
-
-function csrfOk(request: FastifyRequest): boolean {
-  const want = request.session?.csrf;
-  const got = request.headers['x-csrf'];
-  if (typeof want !== 'string' || want === '' || typeof got !== 'string') return false;
-  const a = Buffer.from(want);
-  const b = Buffer.from(got);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-function requireCsrf(request: FastifyRequest): void {
-  if (!SAFE_METHODS.has(request.method) && !csrfOk(request)) {
-    throw new DashError('forbidden', 'CSRF token missing or invalid');
-  }
 }
 
 function userOf(u: SessionUser): RouteRequest['user'] {

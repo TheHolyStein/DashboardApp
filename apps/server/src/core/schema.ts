@@ -126,6 +126,17 @@ export const notifications = sqliteTable(
   ],
 );
 
+// until: ISO-8601 UTC time or the literal 'forever'. Migration 0002_notification_mutes.sql.
+export const notificationMutes = sqliteTable(
+  'notification_mutes',
+  {
+    userId: text('user_id').notNull(),
+    moduleId: text('module_id').notNull(),
+    until: text('until').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.moduleId] })],
+);
+
 export const httpCache = sqliteTable(
   'http_cache',
   {

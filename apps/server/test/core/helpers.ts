@@ -30,15 +30,22 @@ export const TEST_USERS: Record<string, SessionUser> = {
  * skip-override symbol (what fastify-plugin sets).
  */
 export function testAuth(
-  opts: { grants?: Record<string, PermissionLevel>; defaultLevel?: PermissionLevel; appPassword?: string } = {},
+  opts: {
+    grants?: Record<string, PermissionLevel>;
+    defaultLevel?: PermissionLevel;
+    appPassword?: string;
+    /** Replaces the default alice/bob users (e.g. to add an admin). */
+    users?: Record<string, SessionUser>;
+  } = {},
 ): AuthSeam & { grants: Record<string, PermissionLevel> } {
   const grants = opts.grants ?? {};
+  const users = opts.users ?? TEST_USERS;
   const plugin: FastifyPluginAsync = async (app) => {
     app.decorateRequest('user', null);
     app.decorateRequest('session', null);
     app.addHook('onRequest', async (req) => {
       const id = req.headers['x-test-user'];
-      const u = typeof id === 'string' ? TEST_USERS[id] : undefined;
+      const u = typeof id === 'string' ? users[id] : undefined;
       if (u) {
         (req as unknown as { user: SessionUser }).user = u;
         req.session = { csrf: `csrf-${u.id}` };
@@ -60,7 +67,7 @@ export function testAuth(
         opts.appPassword !== undefined && header === `Basic ${Buffer.from(opts.appPassword).toString('base64')}`
           ? (TEST_USERS['alice'] as SessionUser)
           : null,
-      listUsers: () => Object.values(TEST_USERS),
+      listUsers: () => Object.values(users),
     }),
   };
 }

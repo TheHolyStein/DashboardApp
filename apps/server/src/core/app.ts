@@ -2,9 +2,14 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type BetterSqlite3 from 'better-sqlite3';
 import { CONTRACT_VERSION } from '@dash/contract';
-import type { AppConfig, AuthSeam } from '../seams.js';
+import type { AppConfig, AuthSeam, CoreSeam } from '../seams.js';
+import { registerAdminModuleRoutes } from './admin-modules.js';
 import { errorHandler } from './errors.js';
-import type { LoadedModule, Scheduler } from './modules/deps.js';
+import { registerInstanceRoutes, type CoreRouteDeps } from './instances.js';
+import type { LoadedModule, LoggerLike, Scheduler, Stream } from './modules/deps.js';
+import { registerNotificationRoutes, type NotificationsService } from './notifications.js';
+import { registerPageRoutes } from './pages.js';
+import type { Snapshots } from './snapshots.js';
 import { registerStreamRoutes, type StreamService } from './stream.js';
 import { mountModule } from './modules/router.js';
 import { DEFAULT_WEB_DIST, registerStatic } from './static.js';
@@ -21,6 +26,19 @@ export interface AppDeps {
   /** When both are given, `GET /api/stream` and `POST /api/stream/view` are registered. */
   stream?: StreamService;
   scheduler?: Pick<Scheduler, 'markViewed'>;
+  /** When given, registers pages, instances, layout, notifications and admin-module routes (task A8). */
+  pagesApi?: PagesApiDeps;
+}
+
+export interface PagesApiDeps {
+  scheduler: Pick<Scheduler, 'syncInstances' | 'register'>;
+  stream: Pick<Stream, 'sendToUser' | 'sendSnapshot'>;
+  snapshots?: Pick<Snapshots, 'forInstance'>;
+  notifications: Pick<NotificationsService, 'api'>;
+  audit: CoreSeam['audit'];
+  now: () => Date;
+  /** Defaults to the app's logger. */
+  logger?: LoggerLike;
 }
 
 const BODY_LIMIT = 1024 * 1024;
@@ -72,7 +90,25 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     registerStreamRoutes(app, { stream: deps.stream, scheduler: deps.scheduler, auth: deps.auth });
   }
 
-  // EXTENSION POINT (later tasks): the other core routes (pages, instances, stream, ...) go here,
+  if (deps.pagesApi) {
+    const p = deps.pagesApi;
+    const routeDeps: CoreRouteDeps = {
+      db: deps.db,
+      auth: deps.auth,
+      modules: deps.modules,
+      scheduler: p.scheduler,
+      stream: p.stream,
+      ...(p.snapshots ? { snapshots: p.snapshots } : {}),
+      now: p.now,
+      logger: p.logger ?? app.log,
+    };
+    registerPageRoutes(app, routeDeps);
+    registerInstanceRoutes(app, routeDeps);
+    registerNotificationRoutes(app, { auth: deps.auth, notifications: p.notifications });
+    registerAdminModuleRoutes(app, { ...routeDeps, scheduler: p.scheduler, audit: p.audit });
+  }
+
+  // EXTENSION POINT (later tasks): remaining core routes go here,
   // after auth and module mounting and before static/SPA fallback.
 
   await registerStatic(app, deps.webDistDir ?? DEFAULT_WEB_DIST);
