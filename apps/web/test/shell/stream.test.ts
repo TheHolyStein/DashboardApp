@@ -103,4 +103,23 @@ describe('stream store', () => {
     vi.advanceTimersByTime(250);
     expect(env.posts).toHaveLength(2);
   });
+
+  it('setVisible while the document is hidden posts nothing after the debounce', () => {
+    const { s, env } = makeStream();
+    env.visible = false;
+    s.connect();
+    FakeEventSource.last.emit(ping());
+    s.setVisible(['a']);
+    vi.advanceTimersByTime(250);
+    expect(env.posts).toHaveLength(0);
+  });
+
+  it('setVisible while disconnected leaves no pending timer and posts after connect', () => {
+    const { s, env } = makeStream();
+    s.setVisible(['a']);
+    expect(vi.getTimerCount()).toBe(0);
+    s.connect();
+    FakeEventSource.last.emit(ping());
+    expect(env.posts).toEqual([{ path: '/stream/view', body: { instanceIds: ['a'] } }]);
+  });
 });

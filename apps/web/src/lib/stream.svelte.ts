@@ -181,7 +181,7 @@ export function createStream(deps: StreamDeps) {
   }
 
   function postView(): void {
-    if (!active || status === 'offline' || visibleIds.length === 0) return;
+    if (!active || !deps.isVisible() || status === 'offline' || visibleIds.length === 0) return;
     deps.post('/stream/view', { instanceIds: visibleIds }).catch(() => {});
   }
 
@@ -231,6 +231,8 @@ export function createStream(deps: StreamDeps) {
       deps.document.removeEventListener('visibilitychange', onVisibility);
       for (const k of Object.keys(snapshots)) delete snapshots[k];
       pending = null;
+      visibleIds = [];
+      instanceModules = {};
       status = 'offline';
     },
     setVisible(ids: InstanceId[]): void {
@@ -238,7 +240,7 @@ export function createStream(deps: StreamDeps) {
       const changed = next.length !== visibleIds.length || next.some((v, i) => v !== visibleIds[i]);
       visibleIds = next;
       syncHeartbeat();
-      if (!changed) return;
+      if (!changed || !active) return;
       if (debounceTimer !== null) deps.clearTimeout(debounceTimer);
       debounceTimer = deps.setTimeout(() => {
         debounceTimer = null;

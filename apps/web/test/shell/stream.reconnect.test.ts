@@ -154,4 +154,42 @@ describe('stream reconnect', () => {
     s.connect(); // idempotent
     expect(count()).toBe(2);
   });
+
+  it('a reconnect that goes live while hidden posts nothing; one post after becoming visible', () => {
+    const { s, doc, env } = makeStream();
+    s.connect();
+    FakeEventSource.last.emit(ping());
+    s.setVisible(['a']);
+    vi.advanceTimersByTime(250);
+    expect(env.posts).toHaveLength(1);
+    env.visible = false;
+    doc.fire('visibilitychange');
+    FakeEventSource.last.fail();
+    vi.advanceTimersByTime(1000);
+    expect(count()).toBe(2);
+    FakeEventSource.last.emit(ping());
+    expect(s.status).toBe('live');
+    expect(env.posts).toHaveLength(1); // live while hidden: no view post
+    env.visible = true;
+    doc.fire('visibilitychange');
+    expect(env.posts).toHaveLength(2);
+    expect(env.posts[1]).toEqual({ path: '/stream/view', body: { instanceIds: ['a'] } });
+  });
+
+  it('after disconnect and connect, old visible ids and module map are not reused', () => {
+    const { s, env } = makeStream();
+    s.setInstanceModules({ a: 'weather' });
+    s.connect();
+    FakeEventSource.last.emit(ping());
+    s.setVisible(['a']);
+    vi.advanceTimersByTime(250);
+    expect(env.posts).toHaveLength(1);
+    s.disconnect();
+    s.connect();
+    FakeEventSource.last.emit(ping());
+    expect(env.posts).toHaveLength(1); // old ids were reset, nothing posted on first event
+    FakeEventSource.last.emit(snap('a', 1));
+    expect(() => FakeEventSource.last.emit({ type: 'revoked', moduleId: 'weather' })).not.toThrow();
+    expect(s.snapshots['a']?.data).toBe(1); // old instance->module map was reset
+  });
 });
