@@ -1,10 +1,23 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { session } from '../lib/session.svelte.js';
   import { t } from '../lib/i18n.js';
+  import { pages } from '../lib/pages.svelte.js';
   import Login from './Login.svelte';
+  import PageTabs from './PageTabs.svelte';
+  import Pages from './Pages.svelte';
 
   let failed = $state(false);
+
+  // Load pages once signed in; drop them (and unsent saves) on sign-out.
+  $effect(() => {
+    const status = session.status;
+    // untrack: the store reads and writes its own state; only the session status may trigger this.
+    untrack(() => {
+      if (status === 'signedIn') void pages.load();
+      else if (status === 'signedOut') pages.clear();
+    });
+  });
 
   onMount(() => {
     session.refresh().catch(() => {
@@ -19,10 +32,12 @@
 {:else if session.status === 'signedOut'}
   <Login {failed} />
 {:else if session.me}
-  <!-- Boundary for later tasks: the top bar and the pages/grid replace this region. -->
+  <!-- Boundary for later tasks: a top bar goes above PageTabs. -->
   <main class="signed-in" data-region="shell-content">
     <p>{t('shell.signedInAs', 'Signed in as {name}', { name: session.me.name })}</p>
     <button type="button" onclick={() => void session.logout()}>{t('shell.signOut', 'Sign out')}</button>
+    <PageTabs />
+    <Pages />
   </main>
 {/if}
 
