@@ -1,7 +1,14 @@
 import type { ModuleId, UserId } from '@dash/contract';
 import type { AuthSeam, CoreSeam } from '../seams.js';
 import { createAuthPlugin, requireUserFrom, type LoginHooks } from './plugin.js';
-import { createLoginLimiter, ipKey, RateLimitedError, userKey, type LoginLimiter } from './ratelimit.js';
+import {
+  createLoginLimiter,
+  ipKey,
+  RateLimitedError,
+  userKey,
+  type AttemptTicket,
+  type LoginLimiter,
+} from './ratelimit.js';
 import { createGrants, type Grants } from './grants.js';
 import { listUsers, type verifyPassword } from './users.js';
 
@@ -45,24 +52,25 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
         ...(kind === 'ip' ? { ip: key.slice('ip:'.length) } : {}),
       }),
   });
-  // Rate limiting runs around the caller's hooks: refuse locked keys first (no password work), and
-  // count a failure whenever the password or a later hook (e.g. TOTP) refuses the attempt.
+  // Rate limiting: the attempt is counted atomically BEFORE password verification (`reserve`), so a
+  // concurrent burst cannot out-run the limit; a wrong password or a refusal by a later hook (e.g.
+  // TOTP) needs nothing more. A right password settles the reservation (`recordSuccess`), which
+  // refuses the login if another request of a burst locked a key in the meantime.
+  const TICKET = 'loginTicket';
   const login: LoginHooks = {
     preCheck: async (ctx) => {
-      const verdict = loginLimiter.check([ipKey(ctx.ip), userKey(ctx.name)]);
-      if (!verdict.allowed) throw new RateLimitedError(verdict.retryAfterSec);
+      const reservation = loginLimiter.reserve([ipKey(ctx.ip), userKey(ctx.name)]);
+      if (!reservation.allowed) throw new RateLimitedError(reservation.retryAfterSec);
+      ctx.state[TICKET] = reservation.ticket;
       await opts.login?.preCheck?.(ctx);
     },
     onResult: async (ctx) => {
-      let refusal: Error | undefined;
-      try {
-        await opts.login?.onResult?.(ctx);
-      } catch (err) {
-        refusal = err instanceof Error ? err : new Error(String(err));
+      await opts.login?.onResult?.(ctx);
+      const ticket = ctx.state[TICKET] as AttemptTicket | undefined;
+      if (ctx.passwordOk && ticket) {
+        const settled = loginLimiter.recordSuccess(ticket);
+        if (!settled.allowed) throw new RateLimitedError(settled.retryAfterSec);
       }
-      if (refusal === undefined && ctx.passwordOk) loginLimiter.recordSuccess(userKey(ctx.name));
-      else loginLimiter.recordFailure([ipKey(ctx.ip), userKey(ctx.name)]);
-      if (refusal !== undefined) throw refusal;
     },
   };
   // Role cache: only enabled users are cached; invalidate on create, role change, disable and delete.

@@ -43,6 +43,8 @@ export interface LoginContext {
   name: string;
   ip: string;
   totp: string | undefined;
+  /** Per-request scratch space shared by `preCheck` and `onResult` (the rate limiter keeps its ticket here). */
+  state: Record<string, unknown>;
 }
 
 /**
@@ -136,7 +138,7 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
       }
       const body = parseWith(LoginBody, req.body);
       const ip = clientIp(req);
-      const ctx: LoginContext = { name: body.name, ip, totp: body.totp };
+      const ctx: LoginContext = { name: body.name, ip, totp: body.totp, state: {} };
       const attempted = body.name.slice(0, 64);
 
       try {
@@ -154,6 +156,7 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
       try {
         await opts.login?.onResult?.({ ...ctx, user: ok ? user : null, passwordOk: ok });
       } catch (err) {
+        if (err instanceof RateLimitedError) void reply.header('Retry-After', String(err.retryAfterSec));
         core.audit({ userId: user?.id ?? null, action: 'auth.login.failure', detail: { name: attempted }, ip });
         throw err;
       }

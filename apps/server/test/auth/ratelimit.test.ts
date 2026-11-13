@@ -202,4 +202,59 @@ describe('login rate limiting', () => {
     e.auth.loginLimiter.purge(new Date(e.clock.now.getTime() + 25 * HOUR));
     expect(rows(e)).toEqual([]);
   });
+
+  describe('concurrent attempts', () => {
+    /** Slow verifier so that all requests are in flight before any verification finishes. */
+    async function slowSetup() {
+      const verify = vi.fn(
+        (_hash: string, password: string) =>
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(password === PASSWORD), 30)),
+      );
+      env = await makeAuthEnv({ auth: { verifyPassword: verify } });
+      await env.addUser('Alice');
+      verify.mockClear();
+      return { e: env, verify };
+    }
+
+    it('10 concurrent logins: at most 5 are verified and a correct password last is refused', async () => {
+      const { e, verify } = await slowSetup();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) => attempt(e, 'Alice', i === 9 ? PASSWORD : BAD)),
+      );
+      expect(verify.mock.calls.length).toBeLessThanOrEqual(5);
+      expect(results.filter((r) => r.statusCode === 401)).toHaveLength(5);
+      expect(results.filter((r) => r.statusCode === 429)).toHaveLength(5);
+      expect(results[9]?.statusCode).toBe(429);
+      expect(results[9]?.headers['set-cookie']).toBeUndefined();
+      expect(e.db.prepare('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 0 });
+      // the lock set by the burst survives
+      expect(rows(e).find((r) => r.key === 'user:alice')?.locked_until).not.toBeNull();
+    });
+
+    it('a correct password in the burst does not log in once another request locked the keys', async () => {
+      const { e } = await slowSetup();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) => attempt(e, 'Alice', i === 2 ? PASSWORD : BAD)),
+      );
+      expect(results[2]?.statusCode).toBe(429);
+      expect(results[2]?.headers['set-cookie']).toBeUndefined();
+      expect(e.db.prepare('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 0 });
+      expect(rows(e).find((r) => r.key === 'user:alice')?.locked_until).not.toBeNull();
+    });
+
+    it('a sequence of successful logins from one IP never locks the IP', async () => {
+      const { env: e } = await setup();
+      for (let i = 0; i < 12; i++) expect((await attempt(e, 'Alice', PASSWORD)).statusCode).toBe(200);
+      const ipRow = rows(e).find((r) => r.key === 'ip:127.0.0.1');
+      expect(ipRow?.locked_until ?? null).toBeNull();
+      expect(ipRow?.count ?? 0).toBe(0);
+    });
+
+    it('the 5th attempt (reserved, locking) can still log in when it is the only one', async () => {
+      const { env: e } = await setup();
+      for (let i = 0; i < 4; i++) await attempt(e, 'Alice', BAD);
+      expect((await attempt(e, 'Alice', PASSWORD)).statusCode).toBe(200);
+      expect(rows(e).every((r) => r.locked_until === null)).toBe(true);
+    });
+  });
 });
