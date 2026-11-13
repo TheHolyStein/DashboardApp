@@ -66,14 +66,25 @@ export const api = {
   delete: <T>(path: string, schema?: z.ZodType<T>) => request<T>('DELETE', path, undefined, schema),
 };
 
-/** Keep a module-relative path inside `/api/m/<id>/`: no dot segments, query, fragment, backslash or encoded `.`/`/`/`\`. */
-function checkModulePath(path: string): string {
+/**
+ * Keep a module-relative path inside `/api/m/<id>/`: no dot segments, query, fragment, backslash,
+ * control characters or whitespace (the URL parser strips tab/LF/CR), and no encoded `.`/`/`/`\`.
+ * As defence in depth, the URL the browser will resolve must still sit under `/api/m/<id>/`.
+ */
+function checkModulePath(moduleId: string, path: string): string {
   const bad =
     !path.startsWith('/') ||
+    // eslint-disable-next-line no-control-regex -- rejecting control characters is the purpose of this check
+    /[\u0000- \u007f]/.test(path) ||
     /[?#\\]/.test(path) ||
     /%(2e|2f|5c)/i.test(path) ||
     path.split('/').some((seg) => seg === '.' || seg === '..');
   if (bad) throw new DashError('invalid', `Invalid module API path: ${path}`);
+  const prefix = `/api/m/${moduleId}/`;
+  const full = `/api/m/${moduleId}${path}`;
+  const resolved = new URL(full, 'http://localhost').pathname;
+  if (resolved !== full || !(resolved === prefix || resolved.startsWith(prefix)))
+    throw new DashError('invalid', `Invalid module API path: ${path}`);
   return path;
 }
 
@@ -82,7 +93,7 @@ export function moduleApi(moduleId: ModuleId): ModuleApi {
   const base = `/m/${moduleId}`;
   // Validation failures reject the returned promise; no request is made.
   const guard = async <T>(path: string, run: (full: string) => Promise<T>): Promise<T> =>
-    run(`${base}${checkModulePath(path)}`);
+    run(`${base}${checkModulePath(moduleId, path)}`);
   return {
     get: <T>(path: string, query?: Record<string, string | number | boolean>) => {
       const qs = query ? new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString() : '';

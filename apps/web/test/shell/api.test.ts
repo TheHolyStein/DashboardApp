@@ -94,7 +94,26 @@ describe('api', () => {
   });
 
   describe('moduleApi confinement', () => {
-    const badPaths = ['/../../auth/logout', '/a/../b', '/./a', 'a', '/a?x=1', '/a#h', '/a\\b', '/%2e%2e/x', '/%2E/x', '/a%2fb', '/a%2Fb', '/a%5cb', '/a%5Cb'];
+    const badPaths = [
+      '/../../auth/logout',
+      '/a/../b',
+      '/./a',
+      'a',
+      '/a?x=1',
+      '/a#h',
+      '/a\\b',
+      '/%2e%2e/x',
+      '/%2E/x',
+      '/a%2fb',
+      '/a%2Fb',
+      '/a%5cb',
+      '/a%5Cb',
+      '/.\t./auth/logout',
+      '/.\n./auth/logout',
+      '/.\r./auth/logout',
+      '/a b',
+      '/a\u0000b',
+    ];
     it.each(badPaths)('rejects path %s without a request', async (p) => {
       const spy = vi.spyOn(globalThis, 'fetch');
       for (const call of [
@@ -115,6 +134,28 @@ describe('api', () => {
     it('accepts a normal nested path', async () => {
       server.use(http.get('/api/m/xx/a/b-c', () => HttpResponse.json({ ok: true })));
       await expect(moduleApi('xx').get('/a/b-c')).resolves.toEqual({ ok: true });
+    });
+    it.each([
+      ['/', '/api/m/xx/'],
+      ['/items', '/api/m/xx/items'],
+      ['/items/abc-123', '/api/m/xx/items/abc-123'],
+      ['/items/a.b', '/api/m/xx/items/a.b'],
+      ['/feed.xml', '/api/m/xx/feed.xml'],
+      ['/a%20b', '/api/m/xx/a%20b'],
+    ])('accepts path %s and requests %s', async (p, expected) => {
+      const seen: string[] = [];
+      server.use(
+        http.get('/api/m/xx/*', ({ request }) => {
+          seen.push(new URL(request.url).pathname);
+          return HttpResponse.json({ ok: true });
+        }),
+        http.get('/api/m/xx/', ({ request }) => {
+          seen.push(new URL(request.url).pathname);
+          return HttpResponse.json({ ok: true });
+        }),
+      );
+      await expect(moduleApi('xx').get(p)).resolves.toEqual({ ok: true });
+      expect(seen).toEqual([expected]);
     });
   });
 });
