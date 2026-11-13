@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DashError, type ModuleId, type PermissionLevel } from '@dash/contract';
 import type { CoreSeam, SessionUser } from '../seams.js';
 import { parseWith, requireCsrf } from '../core/csrf.js';
+import { registerGrantRoutes, type Grants } from './grants.js';
 import { clientIp, RateLimitedError } from './ratelimit.js';
 import {
   clearedCookie,
@@ -60,6 +61,7 @@ export interface AuthPluginOpts {
   core: CoreSeam;
   now: () => Date;
   levelFor(userId: string, moduleId: ModuleId): PermissionLevel;
+  grants: Grants;
   modules?: (() => Array<{ id: ModuleId; levels: ReadonlyArray<'view' | 'edit'> }>) | undefined;
   login?: LoginHooks | undefined;
   /** Replaces argon2 verification (tests count calls). */
@@ -115,6 +117,7 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
   const plugin: FastifyPluginAsync = (app) => {
     app.decorateRequest('user', null);
     app.decorateRequest('session', null);
+    registerGrantRoutes(app, opts.grants);
 
     app.addHook('onRequest', (req, _reply, done) => {
       const sid = readSidCookie(req.headers.cookie);

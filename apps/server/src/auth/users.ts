@@ -23,6 +23,8 @@ export interface UserDeps {
   now: () => Date;
   /** Called after a user row is inserted (wired to `ensureStarterPage` by the caller). */
   onUserCreated?: ((userId: UserId) => void) | undefined;
+  /** Called after a user is created, changes role, is disabled or deleted (wire to `auth.notifyUserChanged`). */
+  onUserChanged?: ((userId: UserId) => void) | undefined;
 }
 
 export interface UserRow extends SessionUser {
@@ -90,6 +92,7 @@ export async function createUser(deps: UserDeps, input: CreateUserInput): Promis
     throw err;
   }
   deps.onUserCreated?.(id);
+  deps.onUserChanged?.(id);
   deps.audit({ userId: id, action: 'user.create', detail: { name, role: input.role } });
   return { id, name, handle, role: input.role };
 }
@@ -149,6 +152,7 @@ export function disableUser(deps: UserDeps, userId: UserId): void {
   const res = deps.db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(userId);
   if (res.changes === 0) throw new DashError('not_found', 'User not found');
   deleteUserSessions(deps.db, userId);
+  deps.onUserChanged?.(userId);
   deps.audit({ userId: null, action: 'user.disable', detail: { target: userId } });
 }
 
