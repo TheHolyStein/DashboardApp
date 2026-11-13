@@ -10,7 +10,11 @@ import {
   type LoginLimiter,
 } from './ratelimit.js';
 import { createGrants, type Grants } from './grants.js';
-import { listUsers, type verifyPassword } from './users.js';
+import { createAppPasswords } from './app-passwords.js';
+import { createTotp } from './totp.js';
+import { loadSecretKey } from '../core/secrets.js';
+import { DashError } from '@dash/contract';
+import { listUsers, verifyPassword as defaultVerifyPassword, type UserDeps } from './users.js';
 
 export { purgeExpiredSessions } from './sessions.js';
 export * from './users.js';
@@ -29,7 +33,11 @@ export interface CreateAuthOptions {
   /** Internal extension points of the login handler (rate limiting B2, TOTP B3). */
   login?: LoginHooks;
   /** Replaces argon2 verification (tests). */
-  verifyPassword?: typeof verifyPassword;
+  verifyPassword?: typeof defaultVerifyPassword;
+  /** Server secret key for TOTP secrets; default: `loadSecretKey(core.config)`, read on first use. */
+  secretKey?: Buffer;
+  /** Replaces the synchronous argon2 check of app passwords (tests count calls). */
+  verifyAppPasswordHash?: (hashed: string, password: string) => boolean;
 }
 
 export type Auth = AuthSeam & {
@@ -68,12 +76,32 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
     onResult: async (ctx) => {
       await opts.login?.onResult?.(ctx);
       const ticket = ctx.state[TICKET] as AttemptTicket | undefined;
+      // Two-factor step: only after the password verified (a wrong password never reveals whether TOTP is on).
+      if (ctx.passwordOk && ctx.user && totp.isEnabled(ctx.user.id, ctx.user.totpSecretEnc)) {
+        if (ctx.totp === undefined || ctx.totp === '') {
+          // Asking for the code is not a failed attempt: refund the reservation.
+          if (ticket) loginLimiter.release(ticket);
+          throw new DashError('invalid', 'Two-factor code required', { totpRequired: true });
+        }
+        // A wrong or replayed code is a failure (the reservation already counted it) and looks like a wrong password.
+        if (!totp.verifyLogin(ctx.user.id, ctx.user.totpSecretEnc, ctx.totp)) {
+          throw new DashError('unauthenticated', 'Invalid name or password');
+        }
+      }
       if (ctx.passwordOk && ticket) {
         const settled = loginLimiter.recordSuccess(ticket);
         if (!settled.allowed) throw new RateLimitedError(settled.retryAfterSec);
       }
     },
   };
+  let key: Buffer | undefined = opts.secretKey;
+  const totp = createTotp({ db: core.db, now, key: () => (key ??= loadSecretKey(core.config)) });
+  const appPasswords = createAppPasswords({
+    db: core.db,
+    now,
+    limiter: loginLimiter,
+    verifyHash: opts.verifyAppPasswordHash,
+  });
   // Role cache: authoritative. Loaded once with every enabled user; a user absent from it has no role
   // (unknown or disabled). It only changes through `applyUserChange`.
   const roleCache = new Map<UserId, 'admin' | 'member'>();
@@ -110,13 +138,40 @@ export function createAuth(core: CoreSeam, opts: CreateAuthOptions = {}): Auth {
     });
   };
   const levelFor = grants.levelFor;
+  const userDeps: UserDeps = {
+    db: core.db,
+    audit: (entry) => core.audit(entry),
+    now,
+    onUserCreated: (id) => opts.hooks?.onUserCreated?.(id),
+    applyChange: applyUserChange,
+  };
 
   return {
-    plugin: createAuthPlugin({ core, now, levelFor, grants, modules: opts.modules, login, verifyPassword: opts.verifyPassword }),
+    plugin: createAuthPlugin({
+      core,
+      now,
+      levelFor,
+      grants,
+      modules: opts.modules,
+      login,
+      verifyPassword: opts.verifyPassword,
+      routes: {
+        core,
+        db: core.db,
+        now,
+        userDeps,
+        applyUserChange,
+        removeUserGrants: grants.removeUserGrants,
+        forgetUserGrants: (id) => grants.forgetUserGrants(id),
+        verify: opts.verifyPassword ?? defaultVerifyPassword,
+        limiter: loginLimiter,
+        totp,
+        appPasswords,
+      },
+    }),
     requireUser: requireUserFrom,
     levelFor,
-    // STUB until B4 (app passwords): no app password ever verifies.
-    verifyAppPassword: () => null,
+    verifyAppPassword: (header) => appPasswords.verify(header),
     onGrantsChanged: grants.onGrantsChanged,
     listUsers: () => listUsers(core.db),
     loginLimiter,

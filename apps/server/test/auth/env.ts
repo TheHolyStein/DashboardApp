@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,7 +40,7 @@ export async function makeAuthEnv(
   const audit = createAudit(db, now);
   const auth = createAuth(
     { db, audit, config },
-    { now, ...(opts.modules ? { modules: () => opts.modules ?? [] } : {}), ...opts.auth },
+    { now, ...(opts.modules ? { modules: () => opts.modules ?? [] } : {}), secretKey: randomBytes(32), ...opts.auth },
   );
   const app = await buildApp({
     config,

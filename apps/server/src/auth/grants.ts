@@ -29,6 +29,8 @@ export interface Grants {
   listGrants: () => GrantRow[];
   /** Deletes all stored rows of a (deleted) user. */
   removeUserGrants: (userId: UserId) => void;
+  /** Drops the user's entries from the in-memory map only (call after the SQL delete has committed). */
+  forgetUserGrants: (userId: UserId) => void;
   /**
    * Runs `mutate` (which must change the user's role, status or rows AND whatever backs `deps.userRole`),
    * then fires the callbacks for every module whose effective level for this user changed.
@@ -49,6 +51,10 @@ export function createGrants(deps: GrantsDeps): Grants {
   }>) {
     stored.set(key(r.user_id, r.module_id), r.level);
   }
+
+  const forget = (userId: UserId): void => {
+    for (const k of [...stored.keys()]) if (k.startsWith(`${userId}\u0000`)) stored.delete(k);
+  };
 
   const resolve = (
     role: 'admin' | 'member' | null,
@@ -87,8 +93,9 @@ export function createGrants(deps: GrantsDeps): Grants {
       }),
     removeUserGrants: (userId) => {
       deps.db.prepare('DELETE FROM grants WHERE user_id = ?').run(userId);
-      for (const k of [...stored.keys()]) if (k.startsWith(`${userId}\u0000`)) stored.delete(k);
+      forget(userId);
     },
+    forgetUserGrants: forget,
     setGrant: (actor, input, ip) => {
       if (input.level !== 'none' && input.level !== 'view' && input.level !== 'edit') {
         throw new DashError('invalid', 'Level must be none, view or edit');

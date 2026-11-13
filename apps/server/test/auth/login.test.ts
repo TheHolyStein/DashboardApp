@@ -265,4 +265,67 @@ describe('createUser', () => {
     expect(JSON.parse(rows[0]?.detail ?? '{}')).toEqual({ name: 'n'.repeat(64) });
     expect(JSON.stringify(rows)).not.toContain('secret-attempt-123');
   });
+  it('audit rows written for login, failed login, grant change', async () => {
+    env = await makeAuthEnv({ modules: [{ id: 'notes', levels: ['view', 'edit'] }] });
+    await env.addUser('Root', 'admin');
+    const mia = await env.addUser('Mia');
+    await env.login('Mia', 'not the password!');
+    const s = await env.login('Root');
+    const res = await env.app.inject({
+      method: 'PUT',
+      url: '/api/admin/grants',
+      headers: { cookie: s.cookie, 'x-csrf': s.csrf, ...json },
+      payload: { userId: mia.id, moduleId: 'notes', level: 'view' },
+    });
+    expect(res.statusCode).toBe(204);
+    const actions = (env.db.prepare('SELECT action FROM audit_log').all() as Array<{ action: string }>).map((r) => r.action);
+    expect(actions).toEqual(expect.arrayContaining(['auth.login.success', 'auth.login.failure', 'grant.change']));
+  });
+
+  it('disabled user gets exactly the unknown-user response body', async () => {
+    env = await makeAuthEnv();
+    const u = await env.addUser('Dora');
+    env.db.prepare('UPDATE users SET disabled = 1 WHERE id = ?').run(u.id);
+    const disabled = await env.login('Dora');
+    const unknown = await env.login('Nobody');
+    expect(disabled.res.statusCode).toBe(401);
+    expect(disabled.res.body).toBe(unknown.res.body);
+    expect(disabled.res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('a login carrying an existing dash_sid cookie receives a different, new session id', async () => {
+    env = await makeAuthEnv();
+    await env.addUser('Alice');
+    const first = await env.login('Alice');
+    const res = await env.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { ...json, cookie: first.cookie },
+      payload: { name: 'Alice', password: PASSWORD },
+    });
+    expect(res.statusCode).toBe(200);
+    const second = String(res.headers['set-cookie']).split(';')[0];
+    expect(second).toMatch(/^dash_sid=/);
+    expect(second).not.toBe(first.cookie);
+  });
+
+  it('exercises the login hook points with the typed name, ip and result', async () => {
+    const calls: string[] = [];
+    env = await makeAuthEnv({
+      auth: {
+        login: {
+          preCheck: (ctx) => {
+            calls.push(`pre:${ctx.name}:${ctx.totp ?? '-'}`);
+          },
+          onResult: (ctx) => {
+            calls.push(`result:${String(ctx.passwordOk)}:${ctx.user?.name ?? 'none'}`);
+          },
+        },
+      },
+    });
+    await env.addUser('Alice');
+    await env.login('Alice');
+    await env.login('Alice', 'not the password!');
+    expect(calls).toEqual(['pre:Alice:-', 'result:true:Alice', 'pre:Alice:-', 'result:false:none']);
+  });
 });

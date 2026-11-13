@@ -4,7 +4,10 @@ import { z } from 'zod';
 import { DashError, type ModuleId, type PermissionLevel } from '@dash/contract';
 import type { CoreSeam, SessionUser } from '../seams.js';
 import { parseWith, requireCsrf } from '../core/csrf.js';
+import { registerAdminRoutes, type AuthRouteCtx } from './admin.js';
+import { registerAppPasswordRoutes } from './app-passwords.js';
 import { registerGrantRoutes, type Grants } from './grants.js';
+import { registerTotpRoutes } from './totp.js';
 import { clientIp, RateLimitedError } from './ratelimit.js';
 import {
   clearedCookie,
@@ -64,6 +67,8 @@ export interface AuthPluginOpts {
   now: () => Date;
   levelFor(userId: string, moduleId: ModuleId): PermissionLevel;
   grants: Grants;
+  /** Dependencies of the admin, TOTP and app-password routes. */
+  routes: AuthRouteCtx;
   modules?: (() => Array<{ id: ModuleId; levels: ReadonlyArray<'view' | 'edit'> }>) | undefined;
   login?: LoginHooks | undefined;
   /** Replaces argon2 verification (tests count calls). */
@@ -116,10 +121,16 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
     };
   };
 
-  const plugin: FastifyPluginAsync = (app) => {
+  const plugin: FastifyPluginAsync = async (app) => {
+    // Computed once at startup so the first failed login for an unknown user costs one hash like every later one.
+    await getDummyHash();
+    await opts.routes.appPasswords.init();
     app.decorateRequest('user', null);
     app.decorateRequest('session', null);
     registerGrantRoutes(app, opts.grants);
+    registerAdminRoutes(app, opts.routes);
+    registerTotpRoutes(app, opts.routes);
+    registerAppPasswordRoutes(app, opts.routes);
 
     app.addHook('onRequest', (req, _reply, done) => {
       const sid = readSidCookie(req.headers.cookie);
@@ -157,7 +168,9 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
         await opts.login?.onResult?.({ ...ctx, user: ok ? user : null, passwordOk: ok });
       } catch (err) {
         if (err instanceof RateLimitedError) void reply.header('Retry-After', String(err.retryAfterSec));
-        core.audit({ userId: user?.id ?? null, action: 'auth.login.failure', detail: { name: attempted }, ip });
+        // "TOTP code required" is a prompt, not a failed attempt.
+        const prompt = err instanceof DashError && (err.details as { totpRequired?: boolean } | undefined)?.totpRequired === true;
+        if (!prompt) core.audit({ userId: user?.id ?? null, action: 'auth.login.failure', detail: { name: attempted }, ip });
         throw err;
       }
       if (!ok) {
@@ -194,7 +207,6 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
       updatePrefs(db, user.id, patch);
       return toMe(user, req.session?.csrf ?? '');
     });
-    return Promise.resolve();
   };
 
   return fp(plugin, { name: 'dash-auth' });

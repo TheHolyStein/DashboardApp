@@ -61,6 +61,11 @@ export interface LoginLimiter {
    * reservation on the other keys (decrement, or restore the row if this very reservation locked it).
    */
   recordSuccess(ticket: AttemptTicket): LimitCheck;
+  /**
+   * Refunds a reservation as if it had not happened (the password was right but the request is not
+   * a finished attempt, e.g. "TOTP code required"). Never unlocks a key locked by another request.
+   */
+  release(ticket: AttemptTicket): void;
   /** Deletes rows that are unlocked and whose lock level has fully decayed. Needs scheduling. */
   purge(now: Date): void;
 }
@@ -176,8 +181,26 @@ export function createLoginLimiter(deps: LoginLimiterDeps): LoginLimiter {
     return { allowed: true };
   });
 
+  const releaseTx = db.transaction((ticket: AttemptTicket): void => {
+    const t = deps.now().getTime();
+    for (const k of ticket.keys) {
+      const row = select.get(k.key) as Row | undefined;
+      if (!row) continue;
+      const locked = row.locked_until ? Date.parse(row.locked_until) > t : false;
+      if (locked) {
+        if (k.lockedByMe) write(k.key, k.prev); // this very reservation caused the lock; undo it
+        continue;
+      }
+      if (row.count > 0) {
+        if (row.count === 1 && !k.prev) write(k.key, undefined);
+        else write(k.key, { ...row, count: row.count - 1 });
+      }
+    }
+  });
+
   return {
     check,
+    release: (ticket) => releaseTx.immediate(ticket),
     reserve: (keys) => reserveTx.immediate(keys),
     recordFailure: (keys) => failureTx.immediate(keys),
     recordSuccess: (ticket) => successTx.immediate(ticket),

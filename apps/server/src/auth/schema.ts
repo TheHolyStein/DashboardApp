@@ -10,7 +10,8 @@ export const users = sqliteTable('users', {
   handle: text('handle').notNull(), // unique, lower-case
   role: text('role', { enum: ['admin', 'member'] }).notNull(),
   passwordHash: text('password_hash').notNull(),
-  totpSecretEnc: text('totp_secret_enc'),
+  totpSecretEnc: text('totp_secret_enc'), // AES-256-GCM, 'pending:' or 'active:' + base32 inside
+  totpLastStep: integer('totp_last_step'), // last accepted TOTP time step (replay protection)
   prefs: text('prefs').notNull(), // json, matches MeDto.prefs
   disabled: integer('disabled').notNull().default(0),
   createdAt: text('created_at').notNull(),
@@ -38,6 +39,7 @@ export const appPasswords = sqliteTable(
     userId: text('user_id').notNull(),
     label: text('label').notNull(),
     hash: text('hash').notNull(),
+    selector: text('selector').notNull(), // first 8 characters of the password, public lookup id
     scope: text('scope').notNull(), // 'caldav'
     createdAt: text('created_at').notNull(),
     lastUsedAt: text('last_used_at'),
