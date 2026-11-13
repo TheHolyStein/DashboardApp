@@ -38,7 +38,10 @@ export interface LoadedModule {
 
 // ---- A4 (copied from the A4 brief) ---------------------------------------------------------------
 export interface Scheduler {
+  /** Registers (or re-registers, replacing) a module's jobs. Disabled/failed modules are not scheduled. */
   register(mod: LoadedModule): void;
+  /** Re-reads the placed instances of a module: adds/removes per-instance schedules. */
+  syncInstances(moduleId: ModuleId): void;
   markViewed(instanceIds: InstanceId[], at: Date): void;
   setMinimal(on: boolean): void;
   runNow(moduleId: ModuleId, job: string, instanceId?: InstanceId): Promise<void>;

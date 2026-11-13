@@ -93,6 +93,38 @@ export function fakeHostDeps(db: BetterSqlite3.Database, auth: Pick<AuthSeam, 'l
   return { deps, published, pushed, notified };
 }
 
+type JobFn = NonNullable<ModuleServer['jobs']>[string];
+
+/** A loaded module with the given jobs, for scheduler tests (the host is an inert stub). */
+export function jobModule(
+  id: string,
+  jobs: Array<{
+    name: string;
+    intervalSec: number;
+    mode?: 'always' | 'whenViewed';
+    per?: 'instance' | 'module';
+    timeoutSec?: number;
+    run?: JobFn;
+  }>,
+  opts: { enabled?: boolean; failed?: string } = {},
+): LoadedModule {
+  const handlers: Record<string, JobFn> = {};
+  for (const j of jobs) handlers[j.name] = j.run ?? (async () => {});
+  const server = serverFor(id, undefined, {
+    manifest: {
+      jobs: jobs.map((j) => ({
+        name: j.name,
+        intervalSec: j.intervalSec,
+        mode: j.mode ?? 'always',
+        per: j.per ?? 'module',
+        ...(j.timeoutSec ? { timeoutSec: j.timeoutSec } : {}),
+      })),
+    },
+    jobs: handlers,
+  });
+  return { id, server, host: {} as HostServices, enabled: opts.enabled ?? true, ...(opts.failed ? { failed: opts.failed } : {}) };
+}
+
 export interface ModuleEnv {
   app: FastifyInstance;
   db: BetterSqlite3.Database;
