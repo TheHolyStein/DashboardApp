@@ -96,7 +96,7 @@ describe('scheduler', () => {
     await sched.stop();
   });
 
-  it('failure backs off 2×,4×, … capped at 3600 s; success resets', async () => {
+  it('failure backs off 2×,4×,… capped at 3600 s; success resets', async () => {
     let fail = true;
     const { sched } = setup(); // random 0.5 -> jitter exactly 1
     sched.register(
