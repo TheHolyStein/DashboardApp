@@ -37,7 +37,7 @@ export function modulePrefix(moduleId: ModuleId): string {
   return `m_${moduleId.replaceAll('-', '_')}_`;
 }
 
-interface Token {
+export interface Token {
   kind: 'word' | 'name' | 'str' | 'punct'; // name = "x", `x`, [x]; str = 'x'; word = bare word
   value: string; // unquoted for name/str
 }
@@ -47,7 +47,7 @@ interface Token {
  * tokens, so comment markers inside literals (and keywords inside literals/comments) cannot hide or
  * fake statements. Unterminated strings/comments throw (fail closed).
  */
-function tokenize(sql: string, fail: (why: string) => never): Token[] {
+export function tokenize(sql: string, fail: (why: string) => never): Token[] {
   const out: Token[] = [];
   let i = 0;
   const quoted = (open: string, close: string, kind: Token['kind']): void => {
@@ -97,7 +97,7 @@ function tokenize(sql: string, fail: (why: string) => never): Token[] {
   return out;
 }
 
-const isWord = (t: Token | undefined, ...words: string[]): boolean =>
+export const isWord = (t: Token | undefined, ...words: string[]): boolean =>
   t?.kind === 'word' && words.includes(t.value.toUpperCase());
 
 /**
@@ -115,14 +115,22 @@ const isWord = (t: Token | undefined, ...words: string[]): boolean =>
  * Reads (SELECT, foreign-key REFERENCES) are not restricted.
  */
 export function assertMigrationScope(moduleId: ModuleId, migration: Migration): void {
-  const prefix = modulePrefix(moduleId).toLowerCase();
   const fail = (why: string): never => {
     throw new DashError('invalid', `migration ${migration.id} of module ${moduleId}: ${why}`, {
       moduleId,
       migration: migration.id,
     });
   };
-  const toks = tokenize(migration.up, fail);
+  assertWriteScope(moduleId, tokenize(migration.up, fail), fail);
+}
+
+/** Write-scope scan over an already tokenized statement list (see assertMigrationScope). */
+export function assertWriteScope(
+  moduleId: ModuleId,
+  toks: Token[],
+  fail: (why: string) => never,
+): void {
+  const prefix = modulePrefix(moduleId).toLowerCase();
 
   /** Reads `[schema .] name` at index i, checks the prefix, returns the index after it. */
   const name = (i: number, what: string): number => {
@@ -227,6 +235,128 @@ export function assertMigrationScope(moduleId: ModuleId, migration: Migration): 
   }
 }
 
+
+const FROM_ENDERS = new Set([
+  'WHERE', 'GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'WINDOW', 'UNION', 'INTERSECT', 'EXCEPT',
+  'RETURNING', 'SET', 'DO', 'VALUES', 'SELECT',
+]);
+const ALLOWED_TABLE_FUNCTIONS = new Set(['json_each', 'json_tree']);
+
+/**
+ * Read-scope scan for runtime statements: every table reference (after FROM, JOIN, a comma in a FROM
+ * list, or `IN <table>`) must start with the module prefix, be a CTE defined by a WITH clause that is
+ * in scope at that point, or be json_each/json_tree. Fail closed on anything it cannot classify:
+ * a parenthesis in table position that does not open a subquery, any other table-valued function,
+ * a schema qualifier other than `main`, a missing name. Write targets are checked by assertWriteScope.
+ */
+export function assertReadScope(moduleId: ModuleId, toks: Token[], fail: (why: string) => never): void {
+  const prefix = modulePrefix(moduleId).toLowerCase();
+  const isPunct = (t: Token | undefined, v: string): boolean => t?.kind === 'punct' && t.value === v;
+
+  // nesting depth of every token (a ')' carries the depth after it closes)
+  const depth: number[] = [];
+  let d = 0;
+  for (const t of toks) {
+    if (isPunct(t, '(')) {
+      depth.push(d);
+      d++;
+    } else if (isPunct(t, ')')) {
+      d--;
+      if (d < 0) fail('unbalanced parenthesis');
+      depth.push(d);
+    } else depth.push(d);
+  }
+  if (d !== 0) fail('unbalanced parenthesis');
+  const matchClose = (open: number): number => {
+    const want = depth[open] as number;
+    for (let k = open + 1; k < toks.length; k++) if (isPunct(toks[k], ')') && depth[k] === want) return k;
+    return fail('unbalanced parenthesis');
+  };
+
+  // CTE names, each valid only inside the scope of its WITH clause and after its own body
+  // (during the body only when RECURSIVE, where a self-reference binds to the CTE itself).
+  const ctes: Array<{ name: string; from: number; to: number }> = [];
+  toks.forEach((t, w) => {
+    if (!isWord(t, 'WITH')) return;
+    let to = toks.length;
+    for (let k = w + 1; k < toks.length; k++) {
+      if (isPunct(toks[k], ')') && (depth[k] as number) < (depth[w] as number)) {
+        to = k;
+        break;
+      }
+    }
+    let j = w + 1;
+    const recursive = isWord(toks[j], 'RECURSIVE');
+    if (recursive) j++;
+    for (;;) {
+      const nameTok = toks[j];
+      if (nameTok === undefined || nameTok.kind === 'punct' || nameTok.kind === 'str') fail('malformed WITH clause');
+      j++;
+      if (isPunct(toks[j], '(')) j = matchClose(j) + 1;
+      if (!isWord(toks[j], 'AS')) fail('malformed WITH clause');
+      j++;
+      if (isWord(toks[j], 'NOT')) j++;
+      if (isWord(toks[j], 'MATERIALIZED')) j++;
+      if (!isPunct(toks[j], '(')) fail('malformed WITH clause');
+      const close = matchClose(j);
+      ctes.push({ name: nameTok.value.toLowerCase(), from: recursive ? j : close + 1, to });
+      j = close + 1;
+      if (isPunct(toks[j], ',')) j++;
+      else break;
+    }
+  });
+
+  const checkRef = (j: number): void => {
+    let t = toks[j];
+    if (t === undefined) return fail('missing table name');
+    if (isPunct(t, '(')) {
+      if (!isWord(toks[j + 1], 'SELECT', 'WITH', 'VALUES')) fail('parenthesized table list is not allowed');
+      return; // subquery: its own FROM clauses are scanned by the main loop
+    }
+    if (t.kind === 'punct') return fail('missing table name');
+    let k = j;
+    let qualified = false;
+    if (isPunct(toks[k + 1], '.')) {
+      if (t.value.toLowerCase() !== 'main') return fail(`schema "${t.value}" is not allowed`);
+      k += 2;
+      qualified = true;
+      t = toks[k];
+      if (t === undefined || t.kind === 'punct') return fail('missing table name');
+    }
+    const name = t.value.toLowerCase();
+    if (isPunct(toks[k + 1], '(')) {
+      if (!qualified && t.kind === 'word' && ALLOWED_TABLE_FUNCTIONS.has(name)) return;
+      return fail(`table-valued function "${t.value}" is not allowed`);
+    }
+    if (name.startsWith(prefix)) return;
+    if (!qualified && ctes.some((c) => c.name === name && j >= c.from && j < c.to)) return;
+    fail(`"${t.value}" does not start with required prefix ${prefix}`);
+  };
+
+  const mode: boolean[] = [false]; // per depth: inside a FROM list
+  let dd = 0;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i] as Token;
+    if (isPunct(t, '(')) {
+      dd++;
+      mode[dd] = false;
+    } else if (isPunct(t, ')')) {
+      mode[dd] = false;
+      dd--;
+    } else if (isPunct(t, ',')) {
+      if (mode[dd]) checkRef(i + 1);
+    } else if (t.kind === 'word') {
+      const u = t.value.toUpperCase();
+      if (u === 'FROM' || u === 'JOIN') {
+        mode[dd] = true;
+        checkRef(i + 1);
+      } else if (u === 'IN') {
+        if (!isPunct(toks[i + 1], '(')) checkRef(i + 1);
+      } else if (u === 'ON' && isWord(toks[i + 1], 'CONFLICT')) mode[dd] = false;
+      else if (FROM_ENDERS.has(u)) mode[dd] = false;
+    }
+  }
+}
 
 /**
  * Applies the module's pending migrations (id greater than module_state.migration_id), ascending,

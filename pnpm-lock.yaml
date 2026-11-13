@@ -211,6 +211,9 @@ importers:
       '@dash/contract':
         specifier: workspace:*
         version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
       '@fastify/static':
         specifier: ^10.1.10
         version: 10.1.10

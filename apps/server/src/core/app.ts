@@ -1,16 +1,18 @@
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type BetterSqlite3 from 'better-sqlite3';
-import { CONTRACT_VERSION, type ModuleServer } from '@dash/contract';
+import { CONTRACT_VERSION } from '@dash/contract';
 import type { AppConfig, AuthSeam } from '../seams.js';
 import { errorHandler } from './errors.js';
+import type { LoadedModule } from './modules/deps.js';
+import { mountModule } from './modules/router.js';
 import { DEFAULT_WEB_DIST, registerStatic } from './static.js';
 
 export interface AppDeps {
   config: AppConfig;
   db: BetterSqlite3.Database;
   auth: AuthSeam;
-  modules: ModuleServer[];
+  modules: LoadedModule[];
   /** Built web app directory; defaults to the repo's apps/web/dist. */
   webDistDir?: string;
   /** Fastify logger option; defaults to pino with redaction. Tests pass `false`. */
@@ -60,8 +62,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.get('/api/health', () => ({ ok: true, version: SERVER_VERSION, contract: CONTRACT_VERSION }));
 
-  // EXTENSION POINT (later tasks): mount `deps.modules` and the other core routes
-  // (pages, instances, stream, ...) here, after auth and before static/SPA fallback.
+  for (const mod of deps.modules) mountModule(app, mod, deps.auth);
+
+  // EXTENSION POINT (later tasks): the other core routes (pages, instances, stream, ...) go here,
+  // after auth and module mounting and before static/SPA fallback.
 
   await registerStatic(app, deps.webDistDir ?? DEFAULT_WEB_DIST);
   return app;
