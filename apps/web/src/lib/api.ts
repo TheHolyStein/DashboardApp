@@ -81,13 +81,8 @@ export function moduleApi(moduleId: ModuleId): ModuleApi {
   if (!ID_RE.test(moduleId)) throw new DashError('invalid', `Invalid module id: ${moduleId}`);
   const base = `/m/${moduleId}`;
   // Validation failures reject the returned promise; no request is made.
-  const guard = <T>(path: string, run: (full: string) => Promise<T>): Promise<T> => {
-    try {
-      return run(`${base}${checkModulePath(path)}`);
-    } catch (e) {
-      return Promise.reject(e);
-    }
-  };
+  const guard = async <T>(path: string, run: (full: string) => Promise<T>): Promise<T> =>
+    run(`${base}${checkModulePath(path)}`);
   return {
     get: <T>(path: string, query?: Record<string, string | number | boolean>) => {
       const qs = query ? new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString() : '';
