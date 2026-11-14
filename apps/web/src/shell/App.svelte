@@ -3,6 +3,7 @@
   import { session } from '../lib/session.svelte.js';
   import { t } from '../lib/i18n.js';
   import { pages } from '../lib/pages.svelte.js';
+  import DetailHost from './DetailHost.svelte';
   import Login from './Login.svelte';
   import PageTabs from './PageTabs.svelte';
   import Pages from './Pages.svelte';
@@ -38,6 +39,7 @@
     <button type="button" onclick={() => void session.logout()}>{t('shell.signOut', 'Sign out')}</button>
     <PageTabs />
     <Pages />
+    <DetailHost />
   </main>
 {/if}
 
