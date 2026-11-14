@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { clientModules } from '../generated/modules.js';
   import type { GridFactory, IntersectionCallback as IOCallback, IntersectionLike as IO, MediaQueryLike as MQ, MediaFactory, ObserverFactory, ModuleRegistry } from '../lib/grid.js';
   import { t } from '../lib/i18n.js';
@@ -30,11 +30,11 @@
     gridFactory?: GridFactory | undefined;
   } = $props();
 
-  let wide = $state(false);
+  const mq = untrack(() => matchMedia('(min-width: 900px)'));
+  let wide = $state(mq.matches); // synchronous, so desktop never flashes the stack
   let container = $state<HTMLElement | null>(null);
 
   onMount(() => {
-    const mq = matchMedia('(min-width: 900px)');
     wide = mq.matches;
     const on = (): void => {
       wide = mq.matches;
@@ -46,8 +46,8 @@
   // Tell the stream which tiles are on screen.
   $effect(() => {
     const el = container;
-    void pages.current?.instances.length;
-    void wide;
+    // One key per set of tile elements in the DOM: mode, page and its instance ids.
+    void `${wide ? 'grid' : 'stack'}|${pages.currentId}|${pages.current?.instances.map((i) => i.id).join(',')}`;
     if (!el) return;
     // eslint-disable-next-line svelte/prefer-svelte-reactivity -- plain bookkeeping, not rendered
     const visible = new Set<string>();

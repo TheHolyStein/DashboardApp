@@ -2,6 +2,7 @@
 import { PageDto, type InstanceId, type ModuleId } from '@dash/contract';
 import { z } from 'zod';
 import { api as defaultApi } from './api.js';
+import { session } from './session.svelte.js';
 import { stream as defaultStream } from './stream.svelte.js';
 import type { Layout } from './grid.js';
 
@@ -22,6 +23,7 @@ export interface PagesDeps {
   clearTimeout: (h: unknown) => void;
   history: Pick<History, 'pushState' | 'replaceState'>;
   location: Pick<Location, 'pathname' | 'search' | 'hash'>;
+  getUserId: () => string | null;
   window: { addEventListener(type: 'popstate', fn: () => void): void; removeEventListener(type: 'popstate', fn: () => void): void };
 }
 
@@ -32,7 +34,8 @@ export function createPages(deps: PagesDeps) {
   let editing = $state(false);
   const current = $derived(list.find((p) => p.id === currentId) ?? null);
 
-  const pending = new Map<string, { items: LayoutItem[]; timer: unknown }>();
+  const pending = new Map<string, { items: LayoutItem[]; timer: unknown; due: boolean }>();
+  const failedLast = new Set<string>();
   const saving = new Set<string>();
   const deferred = new Set<string>();
   let loadSeq = 0;
@@ -111,22 +114,31 @@ export function createPages(deps: PagesDeps) {
     }
   }
 
+  /** At most one PUT in flight per page; a newer value waits (as the single pending one) until it settles. */
   async function flush(pageId: string): Promise<void> {
     const entry = pending.get(pageId);
-    if (!entry) return;
+    if (!entry || saving.has(pageId)) return;
     pending.delete(pageId);
     saving.add(pageId);
+    let failed = false;
     try {
       await deps.api.put(`/pages/${encodeURIComponent(pageId)}/layout`, { items: entry.items });
     } catch {
-      deferred.add(pageId); // refetch the server's version once the page is idle
+      failed = true;
     } finally {
       saving.delete(pageId);
     }
+    if (failed) failedLast.add(pageId);
+    else failedLast.delete(pageId);
+    const next = pending.get(pageId);
+    if (next?.due) return flush(pageId); // newer value already past its debounce
+    if (!next && failedLast.delete(pageId)) deferred.add(pageId); // refetch the server's version once idle
     settleDeferred(pageId);
   }
 
   function saveLayout(pageId: string, items: LayoutItem[]): void {
+    const target = list.find((p) => p.id === pageId);
+    if (!editing || !target || target.ownerId !== deps.getUserId()) return; // owner-only, edit mode only
     // Optimistic local update so views stay consistent while the PUT is pending.
     list = list.map((p) =>
       p.id === pageId
@@ -143,7 +155,12 @@ export function createPages(deps: PagesDeps) {
     // Merge with an unsent burst for the same page: later items win per instance.
     const merged = prev ? [...prev.items.filter((a) => !items.some((b) => b.id === a.id)), ...items] : items;
     if (prev) deps.clearTimeout(prev.timer);
-    pending.set(pageId, { items: merged, timer: deps.setTimeout(() => void flush(pageId), SAVE_DEBOUNCE_MS) });
+    const entry = { items: merged, due: false, timer: null as unknown };
+    entry.timer = deps.setTimeout(() => {
+      entry.due = true;
+      void flush(pageId);
+    }, SAVE_DEBOUNCE_MS);
+    pending.set(pageId, entry);
   }
 
   function onPopState(): void {
@@ -174,7 +191,9 @@ export function createPages(deps: PagesDeps) {
     pending.clear();
     saving.clear();
     deferred.clear();
+    failedLast.clear();
     list = [];
+    deps.stream.setInstanceModules({});
     status = 'idle';
     editing = false;
   }
@@ -222,5 +241,6 @@ export const pages = createPages({
   clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   history: window.history,
   location: window.location,
+  getUserId: () => session.me?.id ?? null,
   window,
 });

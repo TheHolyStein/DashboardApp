@@ -56,13 +56,15 @@ function makeEnv(initialUrl = '/') {
     },
   };
   const timers = makeTimers();
-  const deps: PagesDeps = { api, stream: fakeStream, ...timers, history, location: loc, window: win };
+  const user = { id: 'u1' as string | null };
+  const deps: PagesDeps = { api, stream: fakeStream, ...timers, history, location: loc, window: win, getUserId: () => user.id };
   return {
     deps,
     history,
     loc,
     timers,
     fakeStream,
+    user,
     popTo: (u: string) => {
       set(u);
       pop?.();
@@ -180,6 +182,7 @@ describe('pages store', () => {
     const e = makeEnv('/');
     await e.store.load();
     const item = (x: number) => [{ id: 'a', layout: lay(x), mobileOrder: 0 }];
+    e.store.setEditing(true);
     e.store.saveLayout('p1', item(1));
     e.timers.advance(400);
     e.store.saveLayout('p1', item(2));
@@ -197,12 +200,76 @@ describe('pages store', () => {
     const puts = serveLayoutPut();
     const e = makeEnv('/');
     await e.store.load();
+    e.store.setEditing(true);
     e.store.saveLayout('p1', [{ id: 'a', layout: lay(1), mobileOrder: 0 }]);
     e.timers.advance(200);
     e.store.saveLayout('p2', [{ id: 'b', layout: lay(4), mobileOrder: 0 }]);
     e.timers.advance(1000);
     await waitFor(() => expect(puts).toHaveLength(2));
     expect(puts.map((p) => p.id).sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('saveLayout is refused when not editing or not the owner (no timer, no request)', async () => {
+    servePages(() => [page('p1', [inst('a')]), page('p2', [inst('b')], { ownerId: 'u2', shared: true })]);
+    const puts = serveLayoutPut();
+    const e = makeEnv('/');
+    await e.store.load();
+    const items = [{ id: 'a', layout: lay(1), mobileOrder: 0 }];
+    e.store.saveLayout('p1', items); // not editing
+    e.store.setEditing(true);
+    e.store.saveLayout('p2', [{ id: 'b', layout: lay(1), mobileOrder: 0 }]); // foreign page
+    e.timers.advance(2000);
+    await Promise.resolve();
+    expect(puts).toHaveLength(0);
+    expect(e.store.list[0]?.instances[0]?.layout).not.toEqual(lay(1));
+  });
+
+  it('layout PUTs are serialised per page: one in flight, latest value last', async () => {
+    servePages(three);
+    const order: unknown[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let first = true;
+    server.use(
+      http.put('/api/pages/:id/layout', async ({ request }) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const body = (await request.json()) as { items: { layout: { x: number } }[] };
+        order.push(body.items[0]?.layout.x);
+        if (first) {
+          first = false;
+          await gate;
+        }
+        inFlight--;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const e = makeEnv('/');
+    await e.store.load();
+    e.store.setEditing(true);
+    const item = (x: number) => [{ id: 'a', layout: lay(x), mobileOrder: 0 }];
+    e.store.saveLayout('p1', item(1));
+    e.timers.advance(500);
+    await waitFor(() => expect(order).toEqual([1]));
+    e.store.saveLayout('p1', item(2));
+    e.timers.advance(500);
+    e.store.saveLayout('p1', item(3));
+    e.timers.advance(500);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual([1]); // second PUT waits for the first
+    release();
+    await waitFor(() => expect(order).toEqual([1, 3]));
+    expect(maxInFlight).toBe(1);
+  });
+
+  it('clear() resets the instance map', async () => {
+    servePages(three);
+    const e = makeEnv('/');
+    await e.store.load();
+    e.store.clear();
+    expect(e.fakeStream.setInstanceModules).toHaveBeenLastCalledWith({});
   });
 
   it('a layout stream event refetches that page', async () => {
@@ -237,7 +304,9 @@ describe('pages store', () => {
     serveLayoutPut();
     const e = makeEnv('/');
     await e.store.load();
+    e.store.setEditing(true);
     e.store.saveLayout('p1', [{ id: 'a', layout: lay(2), mobileOrder: 0 }]);
+    e.store.setEditing(false);
     e.emitLayout('p1');
     await Promise.resolve();
     expect(gets.n).toBe(1);
@@ -371,6 +440,28 @@ describe('Pages and PageTabs components', () => {
     await swipe(inner, -90);
     await swipe(input, -90);
     expect(pages.currentId).toBe('p1');
+  });
+
+  it('page switch between equal-size pages re-observes and updates setVisible', async () => {
+    await loaded([page('p1', [inst('a')]), page('p2', [inst('b')])], '/p/p1');
+    const setVisible = vi.spyOn(stream, 'setVisible');
+    let cb: IntersectionObserverCallback = () => {};
+    let observed: Element[] = [];
+    render(Pages, {
+      ...mobileProps,
+      observerFactory: (c: IntersectionObserverCallback) => {
+        cb = c;
+        observed = [];
+        return { observe: (el: Element) => void observed.push(el), disconnect: () => {} };
+      },
+    });
+    cb([{ target: observed[0]!, isIntersecting: true }] as never, {} as never);
+    expect(setVisible).toHaveBeenLastCalledWith(['a']);
+    pages.select('p2');
+    await waitFor(() => expect(observed.map((o) => o.getAttribute('data-instance-id'))).toEqual(['b']));
+    expect(setVisible).toHaveBeenLastCalledWith([]); // previous page's ids never linger
+    cb([{ target: observed[0]!, isIntersecting: true }] as never, {} as never);
+    expect(setVisible).toHaveBeenLastCalledWith(['b']);
   });
 
   it('reports on-screen tiles to the stream', async () => {

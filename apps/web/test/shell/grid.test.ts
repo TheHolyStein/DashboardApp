@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import {
   clampLayout,
   createGridController,
@@ -151,6 +151,7 @@ describe('Grid.svelte', () => {
 
   it('a layout change is clamped and saved for the whole page', async () => {
     signIn();
+    pages.setEditing(true);
     const save = vi.spyOn(pages, 'saveLayout').mockImplementation(() => {});
     const { g } = await mount(page('p1', twoTiles()));
     g.emit([{ id: 'a', x: 0, y: 0, w: 9, h: 9 }]);
@@ -159,5 +160,34 @@ describe('Grid.svelte', () => {
       { id: 'b', layout: { x: 3, y: 0, w: 3, h: 2 }, mobileOrder: 0 },
     ]);
     save.mockRestore();
+    pages.setEditing(false);
+  });
+
+  it('grid change events while not editing or on a foreign shared page send no save', async () => {
+    signIn();
+    const save = vi.spyOn(pages, 'saveLayout').mockImplementation(() => {});
+    pages.setEditing(false);
+    const own = await mount(page('p1', twoTiles()));
+    own.g.emit([{ id: 'a', x: 1, y: 0, w: 3, h: 2 }]);
+    expect(save).not.toHaveBeenCalled();
+    own.unmount();
+    pages.setEditing(true);
+    const foreign = await mount(page('p9', twoTiles(), { ownerId: 'u2', shared: true }));
+    foreign.g.emit([{ id: 'a', x: 1, y: 0, w: 3, h: 2 }]);
+    expect(save).not.toHaveBeenCalled();
+    save.mockRestore();
+    pages.setEditing(false);
+  });
+
+  it('a failed gridstack load shows an error and retry works', async () => {
+    signIn();
+    const g = new FakeGrid();
+    const loadGrid = vi.fn().mockRejectedValueOnce(new Error('chunk')).mockResolvedValue(() => g);
+    const { findByRole, queryByRole } = render(Grid, { page: page('p1', twoTiles()), modules: registry, loadGrid });
+    const retry = await findByRole('button', { name: 'Retry' });
+    expect(queryByRole('alert')).toBeTruthy();
+    await fireEvent.click(retry);
+    await waitFor(() => expect(g.widgets.length).toBe(2));
+    expect(queryByRole('alert')).toBeNull();
   });
 });

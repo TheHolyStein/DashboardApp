@@ -37,6 +37,7 @@
 <script lang="ts">
   import { clientModules } from '../generated/modules.js';
   import { createGridController, toGridItems, type Layout, type ModuleRegistry } from '../lib/grid.js';
+  import { t } from '../lib/i18n.js';
   import { pages, type Page } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
   import TileSlot from './TileSlot.svelte';
@@ -47,15 +48,24 @@
     page,
     modules = clientModules,
     gridFactory,
-  }: { page: Page; modules?: ModuleRegistry; gridFactory?: GridFactory | undefined } = $props();
+    loadGrid = loadGridstack,
+  }: {
+    page: Page;
+    modules?: ModuleRegistry;
+    gridFactory?: GridFactory | undefined;
+    loadGrid?: () => Promise<GridFactory>;
+  } = $props();
 
   let root = $state<HTMLElement | null>(null);
   let ctl = $state<Controller | null>(null);
+  let loadFailed = $state(false);
+  let attempt = $state(0);
 
   const items = $derived(toGridItems(page.instances, modules));
   const editable = $derived(pages.editing && session.me?.id === page.ownerId);
 
   function onLayout(changes: { id: string; layout: Layout }[]): void {
+    if (!editable) return; // change events also fire on init/compaction; only an owner in edit mode may save
     const byId = new Map(changes.map((c) => [c.id, c.layout]));
     pages.saveLayout(
       page.id,
@@ -65,14 +75,20 @@
 
   $effect(() => {
     const el = root;
+    void attempt;
     if (!el) return;
     let cancelled = false;
     let made: Controller | null = null;
+    loadFailed = false;
     void (async () => {
-      const factory = gridFactory ?? (await loadGridstack());
-      if (cancelled) return;
-      made = createGridController(factory, el, onLayout);
-      ctl = made;
+      try {
+        const factory = gridFactory ?? (await loadGrid());
+        if (cancelled) return;
+        made = createGridController(factory, el, onLayout);
+        ctl = made;
+      } catch {
+        if (!cancelled) loadFailed = true;
+      }
     })();
     return () => {
       cancelled = true;
@@ -96,6 +112,12 @@
   });
 </script>
 
+{#if loadFailed}
+  <div class="load-error" role="alert">
+    <p>{t('grid.loadFailed', 'The page layout could not be loaded.')}</p>
+    <button type="button" onclick={() => attempt++}>{t('grid.retry', 'Retry')}</button>
+  </div>
+{/if}
 <div class="grid-stack grid" class:editable bind:this={root} data-editable={editable}>
   {#each items as item (item.id)}
     {@const inst = page.instances.find((i) => i.id === item.id)}
@@ -122,6 +144,7 @@
 </div>
 
 <style>
+  .load-error { padding: 1rem; color: var(--db-crit, #b3261e); }
     .grid :global(.grid-stack-item-content) { inset: 0; overflow: hidden; border-radius: var(--db-radius, 8px); }
   .editable :global(.grid-stack-item-content) { outline: 2px dashed var(--db-focus, #1f5fd1); outline-offset: -2px; cursor: grab; }
 </style>

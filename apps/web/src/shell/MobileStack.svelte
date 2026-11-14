@@ -19,7 +19,7 @@
   function up(e: PointerEvent): void {
     const s = start;
     start = null;
-    if (!s) return;
+    if (!s || e.pointerId !== s.id) return; // a second pointer must not change the page
     const dir = detectSwipe(e.clientX - s.x, e.clientY - s.y);
     if (dir === 'next') pages.next();
     else if (dir === 'prev') pages.prev();
