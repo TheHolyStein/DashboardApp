@@ -1,0 +1,36 @@
+[Unit]
+Description=Home Dashboard network scan helper (socket-activated)
+Requires=dashboard-netscan.socket
+After=dashboard-netscan.socket
+# Inert until a later plan provides the helper binary.
+ConditionPathExists=/opt/dashboard/deploy/netscan/dashboard-netscan
+
+[Service]
+Type=simple
+ExecStart=/opt/dashboard/deploy/netscan/dashboard-netscan
+DynamicUser=yes
+# Raw sockets for ARP/ICMP scanning are the only privilege it keeps.
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_PACKET AF_UNIX AF_INET AF_INET6
+MemoryMax=64M
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
