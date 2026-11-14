@@ -313,6 +313,60 @@ describe('pages store', () => {
     e.timers.advance(500);
     await waitFor(() => expect(gets.n).toBe(2)); // refetched after the save settled
   });
+
+  it.each([
+    ['fails with 401', 401],
+    ['succeeds', 204],
+  ])('a layout PUT that settles after clear() and %s does not refetch or touch the store', async (_label, status) => {
+    const gets = servePages(three);
+    const puts: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.put('/api/pages/:id/layout', async () => {
+        puts.push('put');
+        await gate;
+        if (status === 401) {
+          return HttpResponse.json({ error: { code: 'unauthenticated', message: 'signed out' } }, { status: 401 });
+        }
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const e = makeEnv('/');
+    await e.store.load();
+    e.store.setEditing(true);
+    e.store.saveLayout('p1', [{ id: 'a', layout: lay(2), mobileOrder: 0 }]);
+    e.timers.advance(500);
+    await waitFor(() => expect(puts).toHaveLength(1));
+    const getsAtClear = gets.n;
+    e.store.clear();
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    e.timers.advance(2000);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(gets.n).toBe(getsAtClear); // no GET /pages after sign-out
+    expect(puts).toHaveLength(1); // no follow-up PUT
+    expect(e.store.list).toEqual([]);
+    expect(e.store.status).toBe('idle');
+  });
+
+  it('a load() whose response arrives after clear() does not populate the store', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.get('/api/pages', async () => {
+        await gate;
+        return HttpResponse.json(three());
+      }),
+    );
+    const e = makeEnv('/');
+    const pending = e.store.load();
+    e.store.clear();
+    release();
+    await pending;
+    expect(e.store.list).toEqual([]);
+    expect(e.store.status).toBe('idle');
+  });
 });
 
 describe('Pages and PageTabs components', () => {

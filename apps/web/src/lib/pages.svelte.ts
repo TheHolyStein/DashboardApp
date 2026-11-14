@@ -39,6 +39,8 @@ export function createPages(deps: PagesDeps) {
   const saving = new Set<string>();
   const deferred = new Set<string>();
   let loadSeq = 0;
+  /** Bumped by clear(); async work that started in an earlier generation must not touch the store. */
+  let generation = 0;
 
   const idFromUrl = (): string | null => {
     const m = PAGE_PATH.exec(deps.location.pathname);
@@ -120,14 +122,15 @@ export function createPages(deps: PagesDeps) {
     if (!entry || saving.has(pageId)) return;
     pending.delete(pageId);
     saving.add(pageId);
+    const gen = generation;
     let failed = false;
     try {
       await deps.api.put(`/pages/${encodeURIComponent(pageId)}/layout`, { items: entry.items });
     } catch {
       failed = true;
-    } finally {
-      saving.delete(pageId);
     }
+    if (gen !== generation) return; // cleared while in flight: clear() already reset the bookkeeping
+    saving.delete(pageId);
     if (failed) failedLast.add(pageId);
     else failedLast.delete(pageId);
     const next = pending.get(pageId);
@@ -187,6 +190,7 @@ export function createPages(deps: PagesDeps) {
   }
   function clear(): void {
     loadSeq++;
+    generation++;
     for (const e of pending.values()) deps.clearTimeout(e.timer);
     pending.clear();
     saving.clear();
