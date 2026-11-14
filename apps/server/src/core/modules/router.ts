@@ -18,9 +18,11 @@ const WEBDAV_METHODS = [
   'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'REPORT', 'MKCALENDAR', 'SEARCH',
 ];
 
-function headersOf(request: FastifyRequest): Record<string, string> {
+/** Request headers for module handlers: never the session cookie; `authorization` only when asked for (appPassword mounts). */
+function headersOf(request: FastifyRequest, withAuthorization = false): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers)) {
+    if (k === 'cookie' || (k === 'authorization' && !withAuthorization)) continue;
     if (v !== undefined) out[k] = Array.isArray(v) ? v.join(', ') : v;
   }
   return out;
@@ -127,7 +129,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
         }
         requireAvailable(mod);
         const level = resolveLevel(auth, user, mod);
-        if (mount.auth === 'session') requireCsrf(request);
+        if (mount.auth !== 'appPassword') requireCsrf(request);
         const rawBody = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
         const res = await h({
           user: userOf(user),
@@ -135,7 +137,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
           params: { ...(request.params as Record<string, string>) },
           query: request.query,
           body: rawBody,
-          headers: headersOf(request),
+          headers: headersOf(request, mount.auth === 'appPassword'),
           raw: request.raw,
           method: request.method,
           path: request.url.split('?')[0] ?? request.url,

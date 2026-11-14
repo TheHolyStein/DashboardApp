@@ -6,7 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node build.mjs",
     "cli": "node --experimental-transform-types --import ./src/auth/register-ts.ts ./src/auth/cli.ts",
     "db:generate": "drizzle-kit generate"
   },
@@ -26,6 +26,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "drizzle-kit": "^0.31.0",
+    "esbuild": "^0.28.2",
     "vitest": "^5.1.0"
   }
 }

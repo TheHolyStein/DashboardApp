@@ -99,7 +99,7 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
     const title = String(n.title).slice(0, TITLE_MAX);
     const body = n.body === undefined ? null : String(n.body).slice(0, BODY_MAX);
     const url = safeUrl(n.url);
-    const stored: Array<{ userId: UserId; dto: NotificationData }> = [];
+    const stored: Array<{ userId: UserId; id: string; createdAt: string }> = [];
 
     db.transaction(() => {
       for (const userId of targets(moduleId, n)) {
@@ -114,25 +114,36 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
         if (existing) update.run(level, title, body, url, createdAt, readAt, id);
         else insert.run(id, moduleId, userId, level, title, body, url, n.dedupeKey ?? null, createdAt, readAt);
         if (!muted) {
-          stored.push({
-            userId,
-            dto: NotificationDto.parse({ id, moduleId, level, title, body, url, createdAt, readAt: null }),
-          });
+          stored.push({ userId, id, createdAt });
         }
       }
     })();
 
-    for (const { userId, dto } of stored) {
-      deps.stream.sendToUser(userId, { type: 'notification', notification: dto });
-      deps.bus.publish('core', 'notification.created', {
-        id: dto.id, userId, moduleId, level: dto.level, title: dto.title, createdAt: dto.createdAt,
-      });
+    // After the commit, each delivery step is isolated: one failing step or user never skips the rest
+    // and never throws into the module's notify call.
+    const guarded = (fn: () => void): void => {
+      try {
+        fn();
+      } catch (err) {
+        sinkFailed(err);
+      }
+    };
+    for (const { userId, id, createdAt } of stored) {
+      let dto: NotificationData;
+      try {
+        dto = NotificationDto.parse({ id, moduleId, level, title, body, url, createdAt, readAt: null });
+      } catch (err) {
+        sinkFailed(err);
+        continue;
+      }
+      guarded(() => deps.stream.sendToUser(userId, { type: 'notification', notification: dto }));
+      guarded(() =>
+        deps.bus.publish('core', 'notification.created', {
+          id: dto.id, userId, moduleId, level: dto.level, title: dto.title, createdAt: dto.createdAt,
+        }),
+      );
       for (const sink of sinks) {
-        try {
-          void Promise.resolve(sink({ userId, notification: dto })).catch((err: unknown) => sinkFailed(err));
-        } catch (err) {
-          sinkFailed(err);
-        }
+        guarded(() => void Promise.resolve(sink({ userId, notification: dto })).catch((err: unknown) => sinkFailed(err)));
       }
     }
   }

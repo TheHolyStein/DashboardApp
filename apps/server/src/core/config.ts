@@ -13,8 +13,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   let port = 8787;
   if (env.DASH_PORT !== undefined && env.DASH_PORT !== '') {
     const n = Number(env.DASH_PORT);
-    if (/^\d+$/.test(env.DASH_PORT) && n >= 1 && n <= 65535) port = n;
-    else problems.push(`DASH_PORT must be an integer 1-65535 (got "${env.DASH_PORT}")`);
+    if (/^\d+$/.test(env.DASH_PORT) && n >= 0 && n <= 65535) port = n;
+    else problems.push(`DASH_PORT must be an integer 0-65535 (0 = pick a free port) (got "${env.DASH_PORT}")`);
   }
 
   let nodeEnv: AppConfig['env'] = 'development';

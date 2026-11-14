@@ -1,10 +1,16 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type BetterSqlite3 from 'better-sqlite3';
 import { DashError, type Migration, type ModuleId } from '@dash/contract';
 
-/** Directory holding the SQL migrations (resolves from both src/core and dist/core). */
-const MIGRATIONS_DIR = fileURLToPath(new URL('../../drizzle/', import.meta.url));
+/**
+ * Directory holding the SQL migrations: `dist/drizzle/` next to the bundle (build.mjs copies it), or
+ * `apps/server/drizzle/` when running from source (`src/core/`). The bundle layout is tried first.
+ */
+const MIGRATIONS_DIR: string = (() => {
+  const candidates = ['./drizzle/', '../../drizzle/'].map((p) => fileURLToPath(new URL(p, import.meta.url)));
+  return candidates.find((c) => existsSync(c)) ?? (candidates[1] as string);
+})();
 
 /**
  * Applies every `*.sql` file in `dir` (default `apps/server/drizzle/`) in filename order, each in

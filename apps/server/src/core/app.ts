@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type BetterSqlite3 from 'better-sqlite3';
 import { CONTRACT_VERSION } from '@dash/contract';
@@ -13,6 +12,7 @@ import type { Snapshots } from './snapshots.js';
 import { registerStreamRoutes, type StreamService } from './stream.js';
 import { mountModule } from './modules/router.js';
 import { DEFAULT_WEB_DIST, registerStatic } from './static.js';
+import { SERVER_VERSION } from './version.js';
 
 export interface AppDeps {
   config: AppConfig;
@@ -50,10 +50,6 @@ const SECURITY_HEADERS: Record<string, string> = {
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'geolocation=(), camera=(), microphone=()',
 };
-
-const SERVER_VERSION: string = (
-  JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
-).version;
 
 const DEFAULT_LOGGER = {
   level: 'info',

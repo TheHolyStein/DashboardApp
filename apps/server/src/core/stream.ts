@@ -1,8 +1,8 @@
 import { PassThrough } from 'node:stream';
-import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { DashError, type InstanceId, type ModuleId, type UserId } from '@dash/contract';
 import type { AuthSeam } from '../seams.js';
+import { csrfOk } from './csrf.js';
 import type { LoggerLike, Scheduler, Stream, StreamEvent, VisibilityDep } from './modules/deps.js';
 import type { Snapshots, StoredSnapshot } from './snapshots.js';
 
@@ -230,15 +230,6 @@ export function createStream(deps: StreamDeps): StreamService {
   }
 
   return { handle, sendSnapshot, sendToUser, sendCore, disconnectUser, viewable, now: deps.now, close };
-}
-
-function csrfOk(request: FastifyRequest): boolean {
-  const want = request.session?.csrf;
-  const got = request.headers['x-csrf'];
-  if (typeof want !== 'string' || want === '' || typeof got !== 'string') return false;
-  const a = Buffer.from(want);
-  const b = Buffer.from(got);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export interface StreamRouteDeps {
