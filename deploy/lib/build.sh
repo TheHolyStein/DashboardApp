@@ -14,7 +14,7 @@ build_app() {
   [ -n "$pm_version" ] || die "no pnpm version in $APP_DIR/package.json (\"packageManager\" field)."
 
   export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-  if [ "$(pnpm --version 2>/dev/null || true)" != "$pm_version" ]; then
+  if [ "$(cd "$APP_DIR" && pnpm --version 2>/dev/null || true)" != "$pm_version" ]; then
     log "activating pnpm $pm_version via corepack"
     run corepack prepare "pnpm@$pm_version" --activate
   fi

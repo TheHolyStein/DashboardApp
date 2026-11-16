@@ -136,8 +136,10 @@ install_firewall() {
     return 0
   fi
   local args=()
-  [ "$ASSUME_YES" = 1 ] && args+=(--yes)
-  if ! "$DEPLOY_DIR/ufw.sh" "${args[@]}"; then
+  if [ "$ASSUME_YES" = 1 ]; then args+=(--yes); fi
+  # A dry run of install.sh must never touch the real firewall; ufw.sh prints its rules instead.
+  if [ "$DASH_DRY_RUN" = 1 ]; then args+=(--dry-run); fi
+  if ! "$DEPLOY_DIR/ufw.sh" ${args[@]+"${args[@]}"}; then
     FIREWALL_FAILED=1
     warn "firewall NOT enabled (see message above). Fix and run: $DEPLOY_DIR/ufw.sh"
   fi

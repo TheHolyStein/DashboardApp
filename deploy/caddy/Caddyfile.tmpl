@@ -27,7 +27,9 @@ ${TS_HOSTNAME} {
 		get_certificate tailscale
 	}
 
-	encode zstd gzip
+	# Compress everything except the event stream, which must flush each event.
+	@compressible not path /api/stream
+	encode @compressible zstd gzip
 
 	request_body {
 		max_size 25MB

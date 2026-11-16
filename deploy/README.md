@@ -14,7 +14,7 @@ firewall and SSH hardening. Code lives in `/opt/dashboard` (root-owned), data in
 | `systemd/dashboard-netscan.{socket,service}` | Socket-activated raw-socket helper; inert until `deploy/netscan/dashboard-netscan` exists |
 | `systemd/caddy-dashboard.conf` | Drop-in: start Caddy after tailscaled |
 | `caddy/Caddyfile.tmpl` | Rendered by `install.sh` (`${TS_HOSTNAME}`, `${TS_BIND_ADDR}`, `${DASH_PORT}` only) to `/etc/caddy/Caddyfile` |
-| `ufw.sh` | Firewall rules; `--dry-run`, `--yes`, `--force`, `--lan <cidr>` |
+| `ufw.sh` | Firewall rules; `--dry-run`, `--yes`, `--force`, `--lan <cidr>`. Refuses to enable if your SSH session would be cut off, or if you are in an SSH session whose source it cannot determine (unless `--force`). `install.sh` with `DASH_DRY_RUN=1` passes `--dry-run` through |
 | `ssh/60-dashboard.conf` | SSH drop-in: no passwords, no root login |
 | `tailscale-acl.example.jsonc` | Example ACL: second person reaches `tag:dashboard:443` only |
 | `test/` | bats tests, `Dockerfile` for the test container |
@@ -28,11 +28,11 @@ firewall and SSH hardening. Code lives in `/opt/dashboard` (root-owned), data in
 5. `/etc/dashboard/secret.key` (32 bytes, `0640 root:dashboard`) and `/etc/dashboard/env`, each written once and never overwritten.
 6. `pnpm install --frozen-lockfile --ignore-scripts`, `pnpm rebuild better-sqlite3 @node-rs/argon2 sharp`, `pnpm audit --prod --audit-level high`.
 7. `pnpm build` with `NODE_OPTIONS=--max-old-space-size=1536`. Steps 6-9 are skipped when the checkout is already the deployed revision (use `--rebuild` to force).
-8. Records the previous revision and backs up the database (`sqlite3 .backup`) to `/var/lib/dashboard/backups/pre-<version>-<timestamp>.{sqlite,rev}`. From here on a failure prints the exact rollback commands.
+8. Backs up the database (`sqlite3 .backup`) to `/var/lib/dashboard/backups/pre-<version>-<previous rev>-<timestamp>.{sqlite,rev}`, once per previous revision: a retry after a failed attempt re-uses the first backup, because the failed attempt may already have migrated the live database. A first install takes no backup. From here on a failure prints the exact rollback commands, naming that backup file and previous revision.
 9. Migrations: none separately; the server migrates when it starts and the health check verifies it.
 10. Installs units, renders and validates the Caddyfile, lets `caddy` fetch Tailscale certificates (`TS_PERMIT_CERT_UID=caddy` in `/etc/default/tailscaled`), installs the SSH drop-in (only if a sudo-capable user has an `authorized_keys` entry), runs `ufw.sh`.
 11. Restarts what changed; waits up to 30 s for `http://127.0.0.1:8787/api/health`.
-12. First install only: asks for the first admin (name, password twice, no echo). Without a terminal it prints the command to run later.
+12. After the health check: if the `users` table has no enabled admin (read-only `sqlite3` query), asks for the first admin (name, password twice, no echo). Without a terminal, or if the query cannot run, it prints the command to run later instead of guessing.
 13. Prints URL and summary.
 
 Flags: `--no-firewall`, `--allow-audit`, `--yes`, `--rebuild`. Environment: `DASH_DRY_RUN=1` prints mutating commands instead of running them; `DASH_ROOT=<prefix>` redirects file paths (used by the tests); `DASH_TS_HOSTNAME` and `DASH_TS_ADDR` override Tailscale detection.

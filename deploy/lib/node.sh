@@ -17,6 +17,24 @@ node_major() {
   echo "${v%%.*}"
 }
 
+# export_pinned_nodesource_key <downloaded> <out.gpg>: the download must hold exactly one
+# primary key with the pinned fingerprint; only that key is exported (from a throwaway keyring),
+# so nothing else in the download can end up trusted by apt.
+export_pinned_nodesource_key() {
+  local in="$1" out="$2" gh pubs fpr
+  pubs="$(gpg --batch --show-keys --with-colons "$in" | grep -c '^pub:' || true)"
+  [ "$pubs" = 1 ] || die "NodeSource key file holds $pubs primary keys, expected exactly 1; refusing to trust it."
+  fpr="$(gpg --batch --show-keys --with-colons "$in" | awk -F: '/^fpr:/ {print $10; exit}')"
+  [ "$fpr" = "$NODESOURCE_KEY_FPR" ] || die "NodeSource key fingerprint mismatch (got '$fpr'); refusing to trust it."
+  gh="$(mktemp -d "$TMP_DIR/gnupg.XXXXXX")"
+  chmod 0700 "$gh"
+  GNUPGHOME="$gh" gpg --batch --quiet --import "$in"
+  GNUPGHOME="$gh" gpg --batch --export "$NODESOURCE_KEY_FPR" >"$out"
+  [ -s "$out" ] || die "could not export the pinned NodeSource key."
+  pubs="$(gpg --batch --show-keys --with-colons "$out" | grep -c '^pub:' || true)"
+  [ "$pubs" = 1 ] || die "exported NodeSource keyring holds $pubs keys, expected 1."
+}
+
 setup_nodesource_repo() {
   local keyring list pin fpr
   keyring="$(rp /etc/apt/keyrings/nodesource.gpg)"
@@ -26,9 +44,7 @@ setup_nodesource_repo() {
   if [ ! -s "$keyring" ]; then
     run curl -fsSL --proto '=https' --tlsv1.2 -o "$TMP_DIR/nodesource.key" "$NODESOURCE_KEY_URL"
     if [ "$DASH_DRY_RUN" != 1 ]; then
-      fpr="$(gpg --batch --show-keys --with-colons "$TMP_DIR/nodesource.key" | awk -F: '/^fpr:/ {print $10; exit}')"
-      [ "$fpr" = "$NODESOURCE_KEY_FPR" ] || die "NodeSource key fingerprint mismatch (got '$fpr'); refusing to trust it."
-      gpg --batch --dearmor -o "$TMP_DIR/nodesource.gpg" "$TMP_DIR/nodesource.key"
+      export_pinned_nodesource_key "$TMP_DIR/nodesource.key" "$TMP_DIR/nodesource.gpg"
     fi
     run install -D -m 0644 -o root -g root "$TMP_DIR/nodesource.gpg" "$keyring"
     CHANGED=1

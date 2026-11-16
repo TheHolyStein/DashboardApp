@@ -12,6 +12,7 @@
 # Idempotent: a second run on an unchanged checkout changes nothing.
 # Test seams: DASH_ROOT=<prefix> redirects file paths, DASH_DRY_RUN=1 prints mutating commands.
 set -euo pipefail
+umask 022
 
 DEPLOY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(dirname -- "$DEPLOY_DIR")"
@@ -48,7 +49,6 @@ UNITS_CHANGED=0
 CADDY_CHANGED=0
 FIREWALL_FAILED=0
 ADMIN_SKIPPED=0
-FIRST_INSTALL=0
 ROLLBACK_ARMED=0
 BACKUP_FILE=""
 PRE_REV=""
@@ -72,9 +72,6 @@ fi
 # 1. checks (and what is deployed right now, before anything changes)
 run_checks
 capture_previous_state
-if [ "$DB_EXISTED" = 0 ] && [ -z "$PRE_REV" ]; then
-  FIRST_INSTALL=1
-fi
 
 # 2-5. packages, node, user and directories, secrets
 install_packages
@@ -117,7 +114,7 @@ fi
 wait_for_health
 record_deployed
 
-# 12. first admin
+# 12. first admin (offered when the users table has no enabled admin)
 create_first_admin
 
 # 13. summary
@@ -133,7 +130,7 @@ if [ -n "$BACKUP_FILE" ]; then
   echo "  Backup:     $BACKUP_FILE"
 fi
 if [ "$ADMIN_SKIPPED" = 1 ]; then
-  echo "  First admin not created. Run:"
+  echo "  No admin user exists (or it could not be checked). Create one with:"
   admin_command_hint
 fi
 if [ "$FIREWALL_FAILED" = 1 ]; then

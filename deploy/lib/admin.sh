@@ -14,19 +14,44 @@ run_cli_as_service_user() {
     "$(rp "$CONF_DIR_ABS/env")" "$APP_DIR/apps/server/dist/cli.js" "$@"
 }
 
+# present | absent | unknown: is there an enabled admin in the users table? Read-only, run as
+# the service user so no root-owned -shm/-wal files appear next to the database.
+admin_status() {
+  local db n
+  db="$(db_path)"
+  if [ ! -f "$db" ] || ! command -v sqlite3 >/dev/null 2>&1; then
+    echo unknown
+    return 0
+  fi
+  if ! n="$(runuser -u "$APP_USER" -- sqlite3 -readonly "$db" "SELECT count(*) FROM users WHERE role='admin' AND disabled=0;" 2>/dev/null)"; then
+    echo unknown
+    return 0
+  fi
+  case "$n" in
+    '' | *[!0-9]*) echo unknown ;;
+    0) echo absent ;;
+    *) echo present ;;
+  esac
+}
+
 create_first_admin() {
-  local name pw1 pw2
-  if [ "$FIRST_INSTALL" != 1 ]; then
-    return 0
-  fi
+  local name pw1 pw2 st
   if [ "$DASH_DRY_RUN" = 1 ]; then
-    echo "+ (prompt for first admin)"
+    echo "+ (check for an admin user; prompt for the first admin if none)"
     return 0
   fi
+  st="$(admin_status)"
+  case "$st" in
+    present) return 0 ;;
+    unknown)
+      ADMIN_SKIPPED=1
+      log "could not check for an admin user; not guessing"
+      return 0
+      ;;
+  esac
   if [ ! -t 0 ]; then
     ADMIN_SKIPPED=1
-    log "no terminal: skipping first admin. Create it later with:"
-    admin_command_hint
+    log "no admin user yet and no terminal: skipping the prompt"
     return 0
   fi
   read -r -p "First admin name: " name

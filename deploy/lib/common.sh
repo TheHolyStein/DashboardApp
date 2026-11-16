@@ -87,3 +87,15 @@ package_manager_version() {
 package_version() {
   sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/package.json" | head -n 1
 }
+
+# fix_owner_mode <path> <mode> <owner> <group>: correct ownership and mode of an existing
+# file; the contents are never touched.
+fix_owner_mode() {
+  local path="$1" mode="$2" owner="$3" group="$4"
+  if [ "$(stat -c '%a %U %G' "$path")" != "${mode#0} $owner $group" ]; then
+    log "correcting owner/mode of $path to $owner:$group $mode"
+    run chown "$owner:$group" "$path"
+    run chmod "$mode" "$path"
+    CHANGED=1
+  fi
+}

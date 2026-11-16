@@ -7,6 +7,7 @@ ensure_secret() {
   if [ -e "$key" ]; then
     size="$(stat -c %s "$key")"
     [ "$size" -eq 32 ] || die "$key exists but is $size bytes, not 32. Not touching it; fix or remove it by hand."
+    fix_owner_mode "$key" 0640 root "$APP_USER"
     log "secret key present (kept)"
     return 0
   fi
@@ -28,6 +29,7 @@ ensure_env_file() {
   local envf tmp
   envf="$(rp "$CONF_DIR_ABS/env")"
   if [ -e "$envf" ]; then
+    fix_owner_mode "$envf" 0640 root "$APP_USER"
     log "env file present (kept)"
     return 0
   fi

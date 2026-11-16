@@ -13,4 +13,4 @@ RUN apt-get update \
 COPY deploy /src/deploy
 WORKDIR /src
 # Runs as root: the tests create a system user and chown inside a fake root.
-CMD ["bats", "/src/deploy/test/install.bats", "/src/deploy/test/units.bats", "/src/deploy/test/caddy.bats"]
+CMD ["bats", "/src/deploy/test"]

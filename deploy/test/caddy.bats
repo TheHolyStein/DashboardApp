@@ -56,6 +56,18 @@ ufw --force enable'
   [[ "$output" == *"Refusing"* ]]
 }
 
+@test "ufw.sh refuses when an SSH session exists but its source cannot be determined" {
+  run env -u SSH_CONNECTION -u SSH_CLIENT SSH_TTY=/dev/pts/9 bash "$DEPLOY/ufw.sh" --yes --lan 192.168.1.0/24
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not be determined"* ]]
+}
+
+@test "the event stream is excluded from compression" {
+  render "$BATS_TEST_TMPDIR/Caddyfile"
+  grep -q '@compressible not path /api/stream' "$BATS_TEST_TMPDIR/Caddyfile"
+  grep -q 'encode @compressible zstd gzip' "$BATS_TEST_TMPDIR/Caddyfile"
+}
+
 @test "ip_in_cidr and cidr_network behave" {
   # shellcheck source=/dev/null
   . "$DEPLOY/lib/net.sh"

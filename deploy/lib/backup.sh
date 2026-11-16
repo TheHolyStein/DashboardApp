@@ -21,16 +21,39 @@ capture_previous_state() {
   if [ -f "$(db_path)" ]; then DB_EXISTED=1; else DB_EXISTED=0; fi
 }
 
-# Needs the backups directory (step 4).
+# Needs the backups directory (step 4). One backup per source revision: the first attempt
+# takes it, and every retry for the same PRE_REV re-uses it, because a failed attempt may
+# already have migrated the live database.
 record_and_backup() {
-  local base
-  base="$(rp "$DATA_DIR_ABS/backups")/pre-$PRE_VERSION-$STAMP"
+  local dir tag base f existing=""
+  dir="$(rp "$DATA_DIR_ABS/backups")"
   BACKUP_FILE=""
+  if [ -z "$PRE_REV" ]; then
+    log "no earlier revision recorded (first install): no backup taken"
+    return 0
+  fi
+  tag="${PRE_REV:0:12}"
+  # Glob order is lexical, so the earliest (first-attempt) stamp wins.
+  for f in "$dir"/pre-*-"$tag"-*.rev; do
+    if [ -e "$f" ]; then
+      existing="$f"
+      break
+    fi
+  done
+  if [ -n "$existing" ]; then
+    base="${existing%.rev}"
+    if [ -e "$base.sqlite" ]; then
+      BACKUP_FILE="$base.sqlite"
+    fi
+    log "re-using the backup of revision $tag from the first attempt: ${BACKUP_FILE:-none}"
+    return 0
+  fi
+  base="$dir/pre-$PRE_VERSION-$tag-$STAMP"
   REV_FILE="$base.rev"
   if [ "$DASH_DRY_RUN" = 1 ]; then
-    echo "+ (record ${PRE_REV:-$HEAD_REV} in $REV_FILE)"
+    echo "+ (record $PRE_REV in $REV_FILE)"
   else
-    printf '%s\n' "${PRE_REV:-$HEAD_REV}" >"$REV_FILE"
+    printf '%s\n' "$PRE_REV" >"$REV_FILE"
     chown "$APP_USER:$APP_USER" "$REV_FILE"
     chmod 0640 "$REV_FILE"
   fi
