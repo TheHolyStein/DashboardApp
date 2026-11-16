@@ -10,7 +10,8 @@ import Both from '../fixtures/Both.svelte';
 import { control } from '../fixtures/control.js';
 import { fakeRegistry } from '../fixtures/registry.js';
 import { server } from '../setup.js';
-import { signIn } from './helpers.js';
+import { session } from '../../src/lib/session.svelte.js';
+import { makeMe, signIn } from './helpers.js';
 import { inst, page } from './pageFixtures.js';
 
 const i1 = inst('i1', { moduleId: 'good' });
@@ -135,6 +136,22 @@ describe('detail pane', () => {
     await setup('/p/p1?d=i1', { good: 'none', boom: 'view' });
     await waitFor(() => expect(location.search).toBe(''));
     expect(dialog()).toBeNull();
+  });
+
+  it('an instance of a module with a missing grant is dropped from the URL and not loaded', async () => {
+    const { loads } = await setup('/p/p1?d=i1', { boom: 'view' });
+    await waitFor(() => expect(location.search).toBe(''));
+    expect(dialog()).toBeNull();
+    expect(loads.good ?? 0).toBe(0);
+  });
+
+  it('revoking the grant while the pane is open closes it', async () => {
+    await setup();
+    detail.open('i1');
+    await screen.findByRole('dialog');
+    session.me = makeMe({ grants: { good: 'none', boom: 'view' } });
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(location.search).toBe('');
   });
 
   it('a throwing Detail shows the failure placeholder inside the pane, and retry re-mounts it', async () => {

@@ -1,5 +1,6 @@
 
-import type { InstanceDto, Mode, ModuleClient, ModuleId, ModuleManifest } from '@dash/contract';
+import type { ChartPalette, InstanceDto, Mode, ModuleClient, ModuleId, ModuleManifest, TileSize } from '@dash/contract';
+import type { Component } from 'svelte';
 import type { z } from 'zod';
 import { moduleApi } from './api.js';
 import { t } from './i18n.js';
@@ -19,8 +20,12 @@ export type HostRegistry = Record<ModuleId, HostEntry>;
 /** Svelte context key for the theme seam. The theme engine provides it; absent means no theme overrides. */
 export const THEME_KEY = 'dash:theme';
 export interface ThemeSeam {
-  /** A full tile replacement for the module, or null to use the module's own tile. */
-  tileFor(moduleId: ModuleId): Promise<TileComponent | null>;
+  /** A full tile replacement for the module at this size (theme `minSize` rules apply), or null to use the module's own tile. */
+  tileFor(moduleId: ModuleId, size?: TileSize): Promise<TileComponent | null>;
+  /** Identity of the active theme; reactive when present, so a theme switch re-resolves overrides. */
+  readonly id?: string;
+  clockFace?: (id?: string) => Promise<Component<any>>; // eslint-disable-line @typescript-eslint/no-explicit-any -- face props are the theme's contract
+  chart?: () => ChartPalette;
   /** Current colour mode; read inside reactive code, so a getter keeps it live. */
   readonly mode?: Mode;
   /** Theme icon source; wins over module-provided icons for the same name. */
@@ -29,22 +34,23 @@ export interface ThemeSeam {
 
 export interface LoadedClient {
   client: ModuleClient;
-  override: TileComponent | null;
 }
 
-/** Load the module's client code; with `withOverride`, also resolve the theme's tile override (a failing seam means no override). */
-export async function loadClient(entry: HostEntry | undefined, theme: ThemeSeam | undefined, withOverride: boolean): Promise<LoadedClient> {
+/** Load the module's client code (once per module; theme overrides are resolved separately by the tile host). */
+export async function loadClient(entry: HostEntry | undefined): Promise<LoadedClient> {
   if (!entry?.load) throw new Error('module client unavailable');
-  const client = (await entry.load()).default;
-  let override: TileComponent | null = null;
-  if (withOverride && theme) {
-    try {
-      override = await theme.tileFor(entry.manifest.id);
-    } catch {
-      override = null;
-    }
-  }
-  return { client, override };
+  return { client: (await entry.load()).default };
+}
+
+/** Access level the user holds on a module; anything but an explicit `view` or `edit` is no access. */
+export function grantLevel(grants: Record<string, string> | undefined, moduleId: string): 'view' | 'edit' | null {
+  const g = grants && Object.hasOwn(grants, moduleId) ? grants[moduleId] : undefined;
+  return g === 'view' || g === 'edit' ? g : null;
+}
+
+/** Icon source for a module: theme icons win; module icons only by own key (no inherited `constructor` etc.). */
+export function lookupIcon(theme: ThemeSeam | undefined, moduleIcons: Record<string, string>, name: string): string | undefined {
+  return theme?.icon?.(name) ?? (Object.hasOwn(moduleIcons, name) ? moduleIcons[name] : undefined);
 }
 
 /** The part of Tile/Detail props that is the same for both. */
@@ -55,7 +61,7 @@ export function baseProps(instance: Instance, mode: Mode) {
     updatedAt: snap?.updatedAt ?? null,
     stale: snap?.stale ?? false,
     settings: instance.settings,
-    level: session.me?.grants[instance.moduleId] === 'edit' ? ('edit' as const) : ('view' as const),
+    level: grantLevel(session.me?.grants, instance.moduleId) === 'edit' ? ('edit' as const) : ('view' as const),
     mode,
     api: moduleApi(instance.moduleId),
     t,

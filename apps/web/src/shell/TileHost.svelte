@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { getContext, onMount, setContext } from 'svelte';
-  import type { Mode, TileProps } from '@dash/contract';
+  import { getContext, onMount, setContext, untrack } from 'svelte';
+  import type { Mode, ModuleClient, TileProps } from '@dash/contract';
   import { Button, ICONS_KEY, T_KEY, Tile } from '@dash/ui';
   import { clientModules } from '../generated/modules.js';
   import { detail } from '../lib/detail.svelte.js';
   import type { Instance } from '../lib/grid.js';
-  import { baseProps, loadClient, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
+  import { baseProps, grantLevel, loadClient, lookupIcon, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
   import { t } from '../lib/i18n.js';
   import type { Page } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
@@ -22,20 +22,61 @@
   const theme = getContext<ThemeSeam | undefined>(THEME_KEY);
   setContext(T_KEY, t);
   let moduleIcons = $state<Record<string, string>>({});
-  setContext(ICONS_KEY, (name: string): string | undefined => theme?.icon?.(name) ?? moduleIcons[name]);
+  setContext(ICONS_KEY, (name: string): string | undefined => lookupIcon(theme, moduleIcons, name));
 
   const entry = $derived(modules[instance.moduleId]);
   const title = $derived(entry ? t(`module.${entry.manifest.id}.name`, entry.manifest.name) : instance.moduleId);
   const mode = $derived<Mode>(theme?.mode ?? 'day');
+  // Only an explicit view/edit grant gives access; the boolean only changes when access is gained or lost.
+  const allowed = $derived(grantLevel(session.me?.grants, instance.moduleId) !== null);
 
   let attempt = $state(0);
   const loading = $derived.by(() => {
     void attempt; // retry loads again
-    const e = entry;
-    return loadClient(e, theme, true).then((loaded) => {
+    if (!allowed) return null;
+    return loadClient(entry).then((loaded) => {
       moduleIcons = loaded.client.icons ?? {};
       return loaded;
     });
+  });
+
+  // Theme tile override: resolved reactively (theme identity, module, tile size), separately from loading the client.
+  let override = $state.raw<ModuleClient['Tile'] | null>(null);
+  let resolved = $state(!theme); // no theme: nothing to wait for
+  let seq = 0;
+  let warned = false;
+  const width = $derived(instance.layout.w);
+  const height = $derived(instance.layout.h);
+  $effect(() => {
+    const th = theme;
+    if (!th) return;
+    void th.id;
+    const moduleId = instance.moduleId;
+    const size = { w: width, h: height };
+    const mine = ++seq; // only the latest resolve may apply
+    if (!allowed) return;
+    let pending: Promise<ModuleClient['Tile'] | null>;
+    try {
+      pending = untrack(() => th.tileFor(moduleId, size));
+    } catch (e) {
+      pending = Promise.reject(e);
+    }
+    pending.then(
+      (c) => {
+        if (mine !== seq) return;
+        override = c;
+        resolved = true;
+      },
+      (e: unknown) => {
+        if (mine !== seq) return;
+        if (!warned) {
+          warned = true;
+          console.warn('theme tile override failed; using the module tile', e);
+        }
+        override = null;
+        resolved = true;
+      },
+    );
   });
 
   const base: ReturnType<typeof baseProps> = $derived(baseProps(instance, mode));
@@ -46,25 +87,33 @@
   });
 
   // Settings are for the page owner with edit level on the module (the server enforces both).
-  const canConfigure = $derived(page.ownerId === session.me?.id && session.me?.grants[instance.moduleId] === 'edit');
+  const canConfigure = $derived(page.ownerId === session.me?.id && grantLevel(session.me?.grants, instance.moduleId) === 'edit');
 
   onMount(() => ticker.subscribe());
 </script>
 
 <Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined}>
-  {#await loading}
-    <div class="skeleton" role="status" aria-label={t('tile.loading', 'Loading')}></div>
-  {:then loaded}
-    {@const Body = loaded.override ?? loaded.client.Tile}
-    <svelte:boundary>
-      <Body {...tileProps} />
-      {#snippet failed(error, reset)}
-        {@render failure(reset, error)}
-      {/snippet}
-    </svelte:boundary>
-  {:catch}
-    {@render failure(() => attempt++, undefined)}
-  {/await}
+  {#if !allowed || !loading}
+    <p class="unavailable" data-unavailable="true">{t('tile.unavailable', 'Module unavailable')}</p>
+  {:else}
+    {#await loading}
+      <div class="skeleton" role="status" aria-label={t('tile.loading', 'Loading')}></div>
+    {:then loaded}
+      {#if resolved}
+        {@const Body = override ?? loaded.client.Tile}
+        <svelte:boundary>
+          <Body {...tileProps} />
+          {#snippet failed(error, reset)}
+            {@render failure(reset, error)}
+          {/snippet}
+        </svelte:boundary>
+      {:else}
+        <div class="skeleton" role="status" aria-label={t('tile.loading', 'Loading')}></div>
+      {/if}
+    {:catch}
+      {@render failure(() => attempt++, undefined)}
+    {/await}
+  {/if}
 </Tile>
 
 {#snippet failure(retry: () => void, error: unknown)}
@@ -81,6 +130,7 @@
     background: linear-gradient(90deg, var(--db-surface-2, #eef0f4), var(--db-surface, #fff), var(--db-surface-2, #eef0f4));
     background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
   }
+  .unavailable { margin: 0; color: var(--db-fg-muted, #4a5260); }
   .failed { display: grid; gap: 0.5rem; justify-items: start; color: var(--db-fg, #15181d); }
   .failed p { margin: 0; }
   @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

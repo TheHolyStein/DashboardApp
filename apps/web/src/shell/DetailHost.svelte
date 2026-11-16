@@ -4,7 +4,7 @@
   import { Button, ICONS_KEY, Pane, T_KEY } from '@dash/ui';
   import { clientModules } from '../generated/modules.js';
   import { detail } from '../lib/detail.svelte.js';
-  import { baseProps, loadClient, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
+  import { baseProps, grantLevel, loadClient, lookupIcon, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
   import { t } from '../lib/i18n.js';
   import { pages } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
@@ -14,7 +14,7 @@
   const theme = getContext<ThemeSeam | undefined>(THEME_KEY);
   setContext(T_KEY, t);
   let moduleIcons = $state<Record<string, string>>({});
-  setContext(ICONS_KEY, (name: string): string | undefined => theme?.icon?.(name) ?? moduleIcons[name]);
+  setContext(ICONS_KEY, (name: string): string | undefined => lookupIcon(theme, moduleIcons, name));
 
   // The instance behind `?d=`, if the user can see it (it is on one of their pages and the module is not revoked).
   const found = $derived.by(() => {
@@ -22,7 +22,7 @@
     if (!id) return null;
     for (const p of pages.list) {
       const i = p.instances.find((x) => x.id === id);
-      if (i) return session.me?.grants[i.moduleId] === 'none' ? null : i;
+      if (i) return grantLevel(session.me?.grants, i.moduleId) ? i : null;
     }
     return null;
   });
@@ -39,7 +39,7 @@
     void attempt;
     const id = moduleId;
     if (!id) return null;
-    return loadClient(modules[id], theme, false).then((loaded) => {
+    return loadClient(modules[id]).then((loaded) => {
       moduleIcons = loaded.client.icons ?? {};
       return loaded;
     });

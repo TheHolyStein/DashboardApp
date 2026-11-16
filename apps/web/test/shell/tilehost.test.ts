@@ -8,7 +8,10 @@ import TileHost from '../../src/shell/TileHost.svelte';
 import { control } from '../fixtures/control.js';
 import OverrideTile from '../fixtures/OverrideTile.svelte';
 import { fakeRegistry } from '../fixtures/registry.js';
-import { signIn } from './helpers.js';
+import { reactiveSeam } from '../fixtures/themeSeam.svelte.js';
+import { session } from '../../src/lib/session.svelte.js';
+import { lookupIcon } from '../../src/lib/host.js';
+import { makeMe, signIn } from './helpers.js';
 import { inst, page } from './pageFixtures.js';
 
 const good = inst('i1', { moduleId: 'good', settings: { label: 'hello' }, layout: { x: 0, y: 0, w: 4, h: 3 } });
@@ -171,6 +174,108 @@ describe('TileHost', () => {
     signIn({ grants: { good: 'view' } });
     renderHost(good, modules);
     expect((await within(document.body).findByTestId('level')).textContent).toBe('view');
+  });
+});
+
+describe('TileHost grants', () => {
+  for (const [name, grants] of [['none', { good: 'none' }], ['missing', {}]] as const) {
+    it(`grant ${name}: module is not loaded, unavailable frame shown, no tile`, async () => {
+      const { modules, loads } = fakeRegistry();
+      signIn({ grants });
+      renderHost(good, modules);
+      expect(await screen.findByText('Module unavailable')).toBeTruthy();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(loads.good ?? 0).toBe(0);
+      expect(screen.queryByTestId('good')).toBeNull();
+    });
+  }
+
+  it('revoking the grant while mounted replaces the tile with the unavailable frame', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    session.me = makeMe({ grants: { good: 'none' } });
+    expect(await screen.findByText('Module unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('good')).toBeNull();
+  });
+
+  it('granting access while mounted loads the tile', async () => {
+    const { modules, loads } = fakeRegistry();
+    signIn({ grants: {} });
+    renderHost(good, modules);
+    await screen.findByText('Module unavailable');
+    session.me = makeMe({ grants: { good: 'view' } });
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    expect(loads.good).toBe(1);
+  });
+
+  it('a module icon named constructor does not resolve to a function', () => {
+    expect(lookupIcon(undefined, {}, 'constructor')).toBeUndefined();
+    expect(lookupIcon(undefined, { clock: '<svg/>' }, 'clock')).toBe('<svg/>');
+  });
+});
+
+describe('TileHost theme override resolution', () => {
+  it('calls tileFor with the tile size', async () => {
+    const { modules } = fakeRegistry();
+    const t = reactiveSeam(() => Promise.resolve(null));
+    renderHost(good, modules, t.seam);
+    await screen.findByTestId('good');
+    expect(t.calls[0]).toMatchObject({ moduleId: 'good', size: { w: 4, h: 3 } });
+  });
+
+  it('switches between override and own tile when the instance layout changes', async () => {
+    const { modules } = fakeRegistry();
+    const t = reactiveSeam((_id, size) => Promise.resolve(size && size.w >= 4 ? OverrideTile : null));
+    const small = inst('i1', { moduleId: 'good', layout: { x: 0, y: 0, w: 2, h: 2 } });
+    const { rerender } = renderHost(small, modules, t.seam);
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    await rerender({ instance: { ...small, layout: { x: 0, y: 0, w: 4, h: 3 } }, page: pg, modules });
+    expect(await screen.findByTestId('override')).toBeTruthy();
+    await rerender({ instance: small, page: pg, modules });
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    expect(screen.queryByTestId('override')).toBeNull();
+  });
+
+  it('a theme switch re-resolves the override', async () => {
+    const { modules } = fakeRegistry();
+    const t = reactiveSeam((_id, _size, themeId) => Promise.resolve(themeId === 'b' ? OverrideTile : null));
+    renderHost(good, modules, t.seam);
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    t.setId('b');
+    expect(await screen.findByTestId('override')).toBeTruthy();
+    t.setId('a');
+    expect(await screen.findByTestId('good')).toBeTruthy();
+  });
+
+  it('a slower earlier resolve does not overwrite a later one', async () => {
+    const { modules } = fakeRegistry();
+    const gates: Record<string, (v: unknown) => void> = {};
+    const t = reactiveSeam((_id, _size, themeId) => new Promise((r) => (gates[themeId] = r)));
+    renderHost(good, modules, t.seam);
+    await waitFor(() => expect(gates.a).toBeTruthy());
+    t.setId('b');
+    await waitFor(() => expect(gates.b).toBeTruthy());
+    gates.b!(null);
+    expect(await screen.findByTestId('good')).toBeTruthy();
+    gates.a!(OverrideTile);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('override')).toBeNull();
+    expect(screen.getByTestId('good')).toBeTruthy();
+  });
+
+  it('keeps showing the current tile while a new override resolves', async () => {
+    const { modules } = fakeRegistry();
+    let release: (v: unknown) => void = () => {};
+    const t = reactiveSeam((_id, _size, themeId) => (themeId === 'a' ? Promise.resolve(null) : new Promise((r) => (release = r))));
+    renderHost(good, modules, t.seam);
+    await screen.findByTestId('good');
+    t.setId('b');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('good')).toBeTruthy();
+    expect(screen.queryByRole('status', { name: 'Loading' })).toBeNull();
+    release(OverrideTile);
+    expect(await screen.findByTestId('override')).toBeTruthy();
   });
 });
 
