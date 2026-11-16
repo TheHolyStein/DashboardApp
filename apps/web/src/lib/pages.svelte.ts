@@ -166,6 +166,28 @@ export function createPages(deps: PagesDeps) {
     pending.set(pageId, entry);
   }
 
+  const mapPage = (pageId: string, fn: (p: Page) => Page): void => {
+    list = list.map((p) => (p.id === pageId ? fn(p) : p));
+    publishModules();
+  };
+
+  /** Put a server-returned instance into its page (after POST). */
+  function addInstance(instance: Page['instances'][number]): void {
+    mapPage(instance.pageId, (p) => ({ ...p, instances: [...p.instances.filter((i) => i.id !== instance.id), instance] }));
+  }
+  /** Replace an instance by id (after PATCH). */
+  function replaceInstance(instance: Page['instances'][number]): void {
+    mapPage(instance.pageId, (p) => ({ ...p, instances: p.instances.map((i) => (i.id === instance.id ? instance : i)) }));
+  }
+  /** Drop an instance (after DELETE) and any unsent layout change for it. */
+  function removeInstance(instanceId: string): void {
+    const owner = list.find((p) => p.instances.some((i) => i.id === instanceId));
+    if (!owner) return;
+    const entry = pending.get(owner.id);
+    if (entry) entry.items = entry.items.filter((i) => i.id !== instanceId);
+    mapPage(owner.id, (p) => ({ ...p, instances: p.instances.filter((i) => i.id !== instanceId) }));
+  }
+
   function onPopState(): void {
     currentId = idFromUrl();
     settle();
@@ -224,6 +246,9 @@ export function createPages(deps: PagesDeps) {
     next: () => step(1),
     prev: () => step(-1),
     saveLayout,
+    addInstance,
+    replaceInstance,
+    removeInstance,
     setEditing(on: boolean): void {
       editing = on;
       if (!on) for (const id of [...deferred]) settleDeferred(id);

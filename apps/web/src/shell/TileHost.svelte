@@ -8,11 +8,14 @@
   import { baseProps, loadClient, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
   import { t } from '../lib/i18n.js';
   import type { Page } from '../lib/pages.svelte.js';
+  import { session } from '../lib/session.svelte.js';
   import { ticker } from '../lib/ticker.svelte.js';
+  import { openSettings } from './SettingsDialog.svelte';
 
   // `page` is part of the frame contract (ownership and edit rights for later tasks).
   let {
     instance,
+    page,
     modules = clientModules,
   }: { instance: Instance; page: Page; modules?: HostRegistry } = $props();
 
@@ -42,10 +45,13 @@
     openDetail: (params?: Record<string, string>) => detail.open(instance.id, params),
   });
 
+  // Settings are for the page owner with edit level on the module (the server enforces both).
+  const canConfigure = $derived(page.ownerId === session.me?.id && session.me?.grants[instance.moduleId] === 'edit');
+
   onMount(() => ticker.subscribe());
 </script>
 
-<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now}>
+<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined}>
   {#await loading}
     <div class="skeleton" role="status" aria-label={t('tile.loading', 'Loading')}></div>
   {:then loaded}

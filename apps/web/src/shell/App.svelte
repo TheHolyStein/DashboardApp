@@ -3,10 +3,13 @@
   import { session } from '../lib/session.svelte.js';
   import { t } from '../lib/i18n.js';
   import { pages } from '../lib/pages.svelte.js';
+  import Catalog from './Catalog.svelte';
   import DetailHost from './DetailHost.svelte';
+  import EditBar from './EditBar.svelte';
   import Login from './Login.svelte';
   import PageTabs from './PageTabs.svelte';
   import Pages from './Pages.svelte';
+  import SettingsDialog from './SettingsDialog.svelte';
 
   let failed = $state(false);
 
@@ -38,8 +41,11 @@
     <p>{t('shell.signedInAs', 'Signed in as {name}', { name: session.me.name })}</p>
     <button type="button" onclick={() => void session.logout()}>{t('shell.signOut', 'Sign out')}</button>
     <PageTabs />
+    <EditBar />
     <Pages />
     <DetailHost />
+    <SettingsDialog />
+    <Catalog />
   </main>
 {/if}
 
