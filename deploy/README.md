@@ -39,6 +39,10 @@ Flags: `--no-firewall`, `--allow-audit`, `--yes`, `--rebuild`. Environment: `DAS
 
 Caddy runs with `admin off`: apply Caddyfile changes with `systemctl restart caddy`, not `reload`.
 
+## Health check: `doctor.sh`
+
+`sudo /opt/dashboard/deploy/doctor.sh [--json]` loads `/etc/dashboard/env` (plain `KEY=value` lines only) and runs `node apps/server/dist/cli.js doctor` as the `dashboard` user. As root it also reads `ufw status` and passes it on, because the service user cannot. It changes nothing and exits 1 if any check is FAIL. The checks and thresholds are in `apps/server/src/core/doctor.ts`; the guides for the owner are in `docs/ops/`.
+
 ## Running the tests
 
 The bats tests need root and Debian tooling, so they run in a container (from the repository root):

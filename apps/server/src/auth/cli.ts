@@ -53,7 +53,12 @@ async function readPassword(): Promise<string> {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
-  if (command !== 'user:create') throw new Error('Usage: cli user:create --name <name> --role admin|member');
+  if (command === 'doctor') {
+    const { doctorMain } = await import('../core/doctor-probes.js');
+    process.exitCode = await doctorMain(rest, process.env);
+    return;
+  }
+  if (command !== 'user:create') throw new Error('Usage: cli user:create --name <name> --role admin|member | cli doctor [--json]');
   const { values } = parseArgs({ args: rest, options: { name: { type: 'string' }, role: { type: 'string' } } });
   if (!values.name) throw new Error('--name is required');
   if (values.role !== 'admin' && values.role !== 'member') throw new Error('--role must be admin or member');
