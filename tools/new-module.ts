@@ -19,7 +19,9 @@ function fillPlaceholders(dir: string, id: string, name: string): void {
     if (statSync(file).isDirectory()) fillPlaceholders(file, id, name);
     else if (!BINARY.test(entry)) {
       const text = readFileSync(file, 'utf8');
-      writeFileSync(file, text.replaceAll('__ID__', id).replaceAll('__NAME__', name));
+      // __TABLE_PREFIX__: the module's SQL table prefix (`m_<id with - as _>_`).
+      const prefix = `m_${id.replaceAll('-', '_')}_`;
+      writeFileSync(file, text.replaceAll('__ID__', id).replaceAll('__NAME__', name).replaceAll('__TABLE_PREFIX__', prefix));
     }
   }
 }

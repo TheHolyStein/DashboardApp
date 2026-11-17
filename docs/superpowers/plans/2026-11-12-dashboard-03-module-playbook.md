@@ -71,6 +71,27 @@ modules/<id>/
 - one test per event published (payload values) and per event handled;
 - tile test for its "needs setup" state.
 
+**Contract v2 helpers** (use these instead of rolling your own; details in `docs/contract-changes/002-v2-from-clock.md`):
+- `newId(host.now())` from `@dash/module-kit`: uuid v7, time-ordered. No `crypto.randomUUID()` for ids.
+- `createSnapshotPusher(host)` from `@dash/module-kit`: `push(instanceId | null, data)` sends only when the JSON changed (returns `false` otherwise); `forget(id)` on instance removal. Create it where you register routes/jobs; never in module-level state.
+- Typed route bodies: `r.post('/x', { level: 'edit', body: Schema }, (req) => … req.body …)` gives `req.body` as `z.infer<typeof Schema>` (same for `query`). Handlers may return a value, a promise, or `undefined` (204). No re-parsing, no casts, no `Promise.resolve` wrapper.
+- `applyMigrations` (mock host) runs every statement of a migration like the real runner: put a table and its index in one migration.
+- Notification text keys: `host.notify({ level, title, body, titleKey: 'm.<id>.notify.x', bodyKey?, vars?: { label } })`. `title`/`body` stay the English fallback (also what Web Push shows); the dashboard renders `t(titleKey, title, vars)`.
+- Detail pane: the shell opens it when the tile frame or the tile title (a button) is activated, except for clicks on links, buttons, inputs or `[data-no-open]` elements, and not in edit mode. Do not add your own overlay button. Set `detail: false` in `defineClient({ … })` for a tile without a detail view; `openDetail(params)` still works for deep links from inside the tile.
+- Context keys and the theme seam: import `THEME_CONTEXT_KEY`, `T_CONTEXT_KEY`, `ICONS_CONTEXT_KEY` and the `ThemeSeam` type from `@dash/contract`; no string literals or local copies.
+- `@dash/ui` extras: `<Button busy={…}>` (disabled, `aria-busy`, same size) and `serial(fn)` (calls run one after another, each returns its own promise) for handlers that read-modify-write a list, so updates are not lost.
+- `@dash/ui` brings its own type declarations: no `env.d.ts` declaration for the uPlot stylesheet in your module.
+- `no-unused-vars` is the typescript-eslint rule in `.svelte` files: parameter names in function types are fine; no disable comments needed.
+
+**More rules of thumb (v2):**
+- **Formatted values are data:** render formatted numbers, times and dates as `<span data-value>{formatted}</span>`. The client contract suite exempts text inside `[data-value]` from the "goes through `t()`" check; do not wrap them in placeholder `t('m.x.value', '{value}', …)` calls. Words still go through `t()`; text without the attribute fails the suite.
+- **Important values must be readable text** (or the tile is unreadable to a screen reader): an image-like rendering (SVG gauge, canvas, clock face) needs `role="img"` and an `aria-label` that contains the value. The theme suite checks this for clock faces (hour and minute in visible text or in the `aria-label`).
+- **Stale:** the tile frame (`@dash/ui` `Tile`) already shows the stale badge from `stale`. Do not re-implement a marker, and do not invent progress from stale data: a countdown keeps counting, with the frame's badge showing that the data is old.
+- **`per: 'module'` jobs** get `instance: null`; wrap every awaited host call in `abortable(ctx.signal, …)`, including `host.instances()`, `host.users()` and `host.store.*`, so the job stops when it is aborted.
+- **Shared pages:** snapshots of an instance on a shared page are visible to every viewer of the page. Put only what the owner is willing to show everyone into a snapshot, and never secrets (see the template README).
+- **Svelte boundaries do not catch async errors.** A rejected promise inside an event handler or `$effect` is yours to catch: `try/catch` around `await api…` and show an error state with `t()`.
+- **Secrets in generated settings forms:** a stored secret is not cleared by leaving the field empty. Offer an explicit remove/reset action (a route that calls `host.secrets.delete`) if clearing must be possible.
+
 ---
 
 ## Part 2 — Clock module
