@@ -159,7 +159,7 @@ export function createOffline(deps: OfflineDeps) {
       for (const p of stored.pages) for (const i of p.instances) grants[i.moduleId] = 'view';
       const prefs = recallTheme();
       restored = true;
-      deps.session.me = { id: '', name: '', handle: '', role: 'member', grants, csrf: '', prefs: { ...prefs, locale: 'en', timeZone: 'UTC' } };
+      deps.session.me = { id: '', name: '', handle: '', role: 'member', grants, csrf: '', totpEnabled: false, prefs: { ...prefs, locale: 'en', timeZone: 'UTC' } };
       deps.session.status = 'signedIn';
       for (const [id, s] of Object.entries(stored.snapshots)) deps.stream.snapshots[id] = { ...s, stale: true };
       deps.pages.restore(stored.pages);

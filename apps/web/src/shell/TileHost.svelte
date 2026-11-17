@@ -1,13 +1,13 @@
 <script lang="ts">
   import { getContext, onMount, setContext, untrack } from 'svelte';
-  import type { Mode, ModuleClient, TileProps } from '@dash/contract';
-  import { Button, ICONS_KEY, T_KEY, Tile } from '@dash/ui';
+  import { ICONS_CONTEXT_KEY, T_CONTEXT_KEY, THEME_CONTEXT_KEY, type Mode, type ModuleClient, type ThemeSeam, type TileProps } from '@dash/contract';
+  import { Button, Tile } from '@dash/ui';
   import { clientModules } from '../generated/modules.js';
   import { detail } from '../lib/detail.svelte.js';
   import type { Instance } from '../lib/grid.js';
-  import { baseProps, grantLevel, loadClient, lookupIcon, THEME_KEY, type HostRegistry, type ThemeSeam } from '../lib/host.js';
+  import { baseProps, grantLevel, loadClient, lookupIcon, type HostRegistry } from '../lib/host.js';
   import { t } from '../lib/i18n.js';
-  import type { Page } from '../lib/pages.svelte.js';
+  import { pages, type Page } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
   import { ticker } from '../lib/ticker.svelte.js';
   import { openSettings } from '../lib/ui-state.svelte.js';
@@ -19,10 +19,12 @@
     modules = clientModules,
   }: { instance: Instance; page: Page; modules?: HostRegistry } = $props();
 
-  const theme = getContext<ThemeSeam | undefined>(THEME_KEY);
-  setContext(T_KEY, t);
+  const theme = getContext<ThemeSeam | undefined>(THEME_CONTEXT_KEY);
+  setContext(T_CONTEXT_KEY, t);
   let moduleIcons = $state<Record<string, string>>({});
-  setContext(ICONS_KEY, (name: string): string | undefined => lookupIcon(theme, moduleIcons, name));
+  // Whether the whole frame opens the detail pane: known once the client has loaded (`detail: false` opts out).
+  let hasDetail = $state(false);
+  setContext(ICONS_CONTEXT_KEY, (name: string): string | undefined => lookupIcon(theme, moduleIcons, name));
 
   const entry = $derived(modules[instance.moduleId]);
   const title = $derived(entry ? t(`module.${entry.manifest.id}.name`, entry.manifest.name) : instance.moduleId);
@@ -36,6 +38,7 @@
     if (!allowed) return null;
     return loadClient(entry).then((loaded) => {
       moduleIcons = loaded.client.icons ?? {};
+      hasDetail = loaded.client.detail !== false;
       return loaded;
     });
   });
@@ -89,10 +92,22 @@
   // Settings are for the page owner with edit level on the module (the server enforces both).
   const canConfigure = $derived(page.ownerId === session.me?.id && grantLevel(session.me?.grants, instance.moduleId) === 'edit');
 
+  const INTERACTIVE = 'a, button, input, select, textarea, [role=button], [data-no-open]';
+  // Not while arranging tiles (drag/resize), and not before the client has loaded or if it has no detail view.
+  const openable = $derived(allowed && hasDetail && !pages.editing);
+  const open = (): void => detail.open(instance.id);
+  function onFrameClick(e: MouseEvent): void {
+    if (!openable || !(e.target instanceof Element) || e.target.closest(INTERACTIVE)) return;
+    open();
+  }
+
   onMount(() => ticker.subscribe());
 </script>
 
-<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined}>
+<!-- Mouse and touch: the whole frame opens the detail pane. Keyboard and assistive technology: the title button (Tile `onOpen`). -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="frame" class:openable data-openable={openable ? 'true' : undefined} onclick={onFrameClick}>
+<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined} onOpen={openable ? open : undefined}>
   {#if !allowed || !loading}
     <p class="unavailable" data-unavailable="true">{t('tile.unavailable', 'Module unavailable')}</p>
   {:else}
@@ -115,6 +130,7 @@
     {/await}
   {/if}
 </Tile>
+</div>
 
 {#snippet failure(retry: () => void, error: unknown)}
   <div class="failed" role="alert" data-failed="true">
@@ -125,6 +141,8 @@
 {/snippet}
 
 <style>
+  .frame { height: 100%; }
+  .frame.openable { cursor: pointer; }
   .skeleton {
     height: 100%; min-height: 3rem; border-radius: var(--db-radius, 8px);
     background: linear-gradient(90deg, var(--db-surface-2, #eef0f4), var(--db-surface, #fff), var(--db-surface-2, #eef0f4));

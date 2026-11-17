@@ -56,6 +56,10 @@
   let totpMsg = $state<{ kind: 'ok' | 'err'; text: string } | null>(null);
   let totpBusy = $state(false);
   let offPassword = $state('');
+  const totpOn = $derived(session.me?.totpEnabled ?? false);
+  function setTotpOn(on: boolean): void {
+    if (session.me) session.me = { ...session.me, totpEnabled: on };
+  }
 
   async function startSetup(): Promise<void> {
     totpMsg = null;
@@ -73,6 +77,7 @@
         qrNote = true; // too long for the compact encoder: the secret and URL below still work
       }
     } catch (err) {
+      if (isCode(err, 'conflict')) setTotpOn(true);
       totpMsg = {
         kind: 'err',
         text: isCode(err, 'conflict')
@@ -92,6 +97,7 @@
       setup = null;
       qr = null;
       code = '';
+      setTotpOn(true);
       totpMsg = { kind: 'ok', text: t('account.totpOn', 'Two-factor sign-in is on.') };
     } catch (err) {
       totpMsg = {
@@ -110,6 +116,7 @@
       await api.post('/me/totp/disable', { password: offPassword });
       offPassword = '';
       setup = null;
+      setTotpOn(false);
       totpMsg = { kind: 'ok', text: t('account.totpOff', 'Two-factor sign-in is off.') };
     } catch (err) {
       totpMsg = {
@@ -239,12 +246,13 @@
           </div>
         </form>
       </div>
-    {:else}
-      <div class="row"><Button onclick={() => void startSetup()} disabled={totpBusy}>{t('account.totpSetup', 'Set up two-factor sign-in')}</Button></div>
+    {:else if totpOn}
       <form onsubmit={disableTotp}>
         <label>{t('account.totpOffPassword', 'Password (to turn it off)')}<input type="password" autocomplete="current-password" required bind:value={offPassword} /></label>
-        <div class="row"><Button type="submit" disabled={totpBusy}>{t('account.totpDisable', 'Turn off')}</Button></div>
+        <div class="row"><Button type="submit" busy={totpBusy}>{t('account.totpDisable', 'Turn off')}</Button></div>
       </form>
+    {:else}
+      <div class="row"><Button onclick={() => void startSetup()} busy={totpBusy}>{t('account.totpSetup', 'Set up two-factor sign-in')}</Button></div>
     {/if}
   </section>
 

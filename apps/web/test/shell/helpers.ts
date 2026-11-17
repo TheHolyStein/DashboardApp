@@ -11,6 +11,7 @@ export function makeMe(over: Partial<z.infer<typeof MeDto>> = {}): z.infer<typeo
     role: 'admin',
     grants: {},
     csrf: 'csrf-token',
+    totpEnabled: false,
     prefs: { theme: 'default', modePolicy: 'system', locale: 'en', timeZone: 'UTC' },
     ...over,
   };

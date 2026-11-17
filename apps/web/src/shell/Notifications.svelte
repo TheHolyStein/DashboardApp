@@ -4,6 +4,7 @@
   import { clientModules } from '../generated/modules.js';
   import { detail } from '../lib/detail.svelte.js';
   import { t } from '../lib/i18n.js';
+  import { bodyOf, titleOf } from './notificationText.js';
   import { isSafeAppUrl, notifications, type Notification } from '../lib/notifications.svelte.js';
   import { pages } from '../lib/pages.svelte.js';
   import { ticker } from '../lib/ticker.svelte.js';
@@ -113,8 +114,8 @@
               <button type="button" class="item" onclick={() => void activate(n)}>
                 <span class="lvl" role="img" aria-label={LEVEL[n.level]()} data-level={n.level}>{ICON[n.level]}</span>
                 <span class="txt">
-                  <span class="title">{n.title}</span>
-                  {#if n.body}<span class="body">{n.body}</span>{/if}
+                  <span class="title">{titleOf(n)}</span>
+                  {#if bodyOf(n)}<span class="body">{bodyOf(n)}</span>{/if}
                   {#if n.url && !isSafeAppUrl(n.url)}<span class="body" data-testid="unsafe-url">{n.url}</span>{/if}
                   <span class="meta">{moduleName(n.moduleId)} · {formatRelative(n.createdAt, ticker.now, t)}</span>
                 </span>

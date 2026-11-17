@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setLocaleStrings } from '../../src/lib/i18n.js';
 import { createNotifications, isSafeAppUrl, type Notification } from '../../src/lib/notifications.svelte.js';
 import { pages } from '../../src/lib/pages.svelte.js';
 import { api } from '../../src/lib/api.js';
@@ -12,7 +13,7 @@ import { errorResponse, signIn } from './helpers.js';
 import { inst, page } from './pageFixtures.js';
 
 function n(id: string, over: Partial<Notification> = {}): Notification {
-  return { id, moduleId: 'feeds', level: 'info', title: `Title ${id}`, body: null, url: null, createdAt: `2026-11-17T10:0${id.slice(-1)}:00.000Z`, readAt: null, ...over };
+  return { id, moduleId: 'feeds', level: 'info', title: `Title ${id}`, body: null, titleKey: null, bodyKey: null, vars: null, url: null, createdAt: `2026-11-17T10:0${id.slice(-1)}:00.000Z`, readAt: null, ...over };
 }
 
 function rig(initial: Notification[] = []) {
@@ -198,6 +199,28 @@ describe('notifications dropdown', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(bell.getAttribute('aria-expanded')).toBe('false'));
     await waitFor(() => expect(document.activeElement).toBe(bell));
+  });
+
+  it('renders t(titleKey, title, vars) and t(bodyKey, body, vars) when keys are present, else the fallback text', async () => {
+    signIn();
+    const { store } = rig([
+      n('n2', { title: 'Timer finished', titleKey: 'm.clock.notify.finished', body: 'Done: {label}', bodyKey: 'm.clock.notify.body', vars: { label: 'Tea' } }),
+      n('n1', { title: 'Plain title', body: 'Plain body' }),
+    ]);
+    store.start();
+    await waitFor(() => expect(store.items).toHaveLength(2));
+    setLocaleStrings({ 'm.clock.notify.finished': 'Timer {label} fertig' });
+    try {
+      const user = userEvent.setup();
+      render(Notifications, { props: { store, modules: {} } });
+      await user.click(screen.getByRole('button', { name: /Notifications/ }));
+      expect(screen.getByText('Timer Tea fertig')).toBeTruthy(); // key found: translated, vars interpolated
+      expect(screen.getByText('Done: Tea')).toBeTruthy(); // bodyKey unknown: fallback interpolated
+      expect(screen.getByText('Plain title')).toBeTruthy();
+      expect(screen.getByText('Plain body')).toBeTruthy();
+    } finally {
+      setLocaleStrings({});
+    }
   });
 
   it('"View all" appears only when the user has a notifications instance', async () => {

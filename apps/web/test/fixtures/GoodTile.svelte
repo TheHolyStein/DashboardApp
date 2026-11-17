@@ -11,4 +11,7 @@
   <span data-testid="label">{settings.label ?? ''}</span>
   <button type="button" onclick={() => openDetail({ tab: 'week' })}>open week</button>
   <button type="button" onclick={() => openDetail()}>open plain</button>
+  <button type="button" data-testid="noop">noop</button>
+  <span data-no-open data-testid="no-open">keep</span>
+  <span data-testid="plain-area">plain</span>
 </div>

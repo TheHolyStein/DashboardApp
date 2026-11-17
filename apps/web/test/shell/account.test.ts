@@ -85,6 +85,8 @@ describe('account: two-factor', () => {
     expect(await screen.findByText('Two-factor sign-in is on.')).toBeTruthy();
     expect(enable).toEqual([{ code: '123456' }]);
     expect(screen.queryByTestId('totp-secret')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Turn off' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Set up two-factor sign-in' })).toBeNull();
   });
 
   it('a bad code and an already-enabled account give their own messages', async () => {
@@ -112,6 +114,7 @@ describe('account: two-factor', () => {
         ok ? new HttpResponse(null, { status: 204 }) : errorResponse('forbidden', 403, 'x', { reason: 'wrong_password' }),
       ),
     );
+    signIn({ totpEnabled: true });
     const user = userEvent.setup();
     render(Account);
     await user.type(screen.getByLabelText('Password (to turn it off)'), 'bad');
@@ -120,6 +123,19 @@ describe('account: two-factor', () => {
     ok = true;
     await user.click(screen.getByRole('button', { name: 'Turn off' }));
     await waitFor(() => expect(screen.getByText('Two-factor sign-in is off.')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Set up two-factor sign-in' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Turn off' })).toBeNull();
+  });
+
+  it('shows set-up when two-factor is off and turn-off when it is on, never both', () => {
+    const a = render(Account);
+    expect(screen.getByRole('button', { name: 'Set up two-factor sign-in' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Turn off' })).toBeNull();
+    a.unmount();
+    signIn({ totpEnabled: true });
+    render(Account);
+    expect(screen.getByRole('button', { name: 'Turn off' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Set up two-factor sign-in' })).toBeNull();
   });
 });
 

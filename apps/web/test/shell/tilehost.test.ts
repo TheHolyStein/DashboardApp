@@ -2,12 +2,15 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stream } from '../../src/lib/stream.svelte.js';
+import { detail } from '../../src/lib/detail.svelte.js';
+import { pages } from '../../src/lib/pages.svelte.js';
 import { createTicker, TICK_MS } from '../../src/lib/ticker.svelte.js';
 import { THEME_KEY, type HostRegistry, type ThemeSeam } from '../../src/lib/host.js';
 import TileHost from '../../src/shell/TileHost.svelte';
 import { control } from '../fixtures/control.js';
 import OverrideTile from '../fixtures/OverrideTile.svelte';
-import { fakeRegistry } from '../fixtures/registry.js';
+import { client, fakeRegistry } from '../fixtures/registry.js';
+import GoodTile from '../fixtures/GoodTile.svelte';
 import { reactiveSeam } from '../fixtures/themeSeam.svelte.js';
 import { session } from '../../src/lib/session.svelte.js';
 import { lookupIcon } from '../../src/lib/host.js';
@@ -174,6 +177,75 @@ describe('TileHost', () => {
     signIn({ grants: { good: 'view' } });
     renderHost(good, modules);
     expect((await within(document.body).findByTestId('level')).textContent).toBe('view');
+  });
+});
+
+describe('TileHost detail affordance', () => {
+  beforeEach(() => {
+    detail.sync();
+    pages.setEditing(false);
+  });
+  afterEach(() => {
+    pages.setEditing(false);
+    window.history.replaceState(null, '', '/');
+    detail.sync();
+  });
+
+  it('clicking the frame opens the pane for the instance', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    await userEvent.click(await screen.findByTestId('plain-area'));
+    expect(detail.current).toEqual({ id: 'i1', params: {} });
+  });
+
+  it('clicking a button or a [data-no-open] element inside the tile does not open it', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    await userEvent.click(await screen.findByTestId('noop'));
+    await userEvent.click(screen.getByTestId('no-open'));
+    expect(detail.current).toBeNull();
+  });
+
+  it('the tile can still open the pane with its own params', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    await userEvent.click(await screen.findByRole('button', { name: 'open week' }));
+    expect(detail.current).toEqual({ id: 'i1', params: { tab: 'week' } });
+  });
+
+  it('edit mode does not open the pane and shows no title button', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    await screen.findByTestId('plain-area');
+    pages.setEditing(true);
+    await userEvent.click(screen.getByTestId('plain-area'));
+    expect(detail.current).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Good' })).toBeNull());
+  });
+
+  it('the title is a button that opens the pane with Enter and with Space', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, modules);
+    const title = await screen.findByRole('button', { name: 'Good' });
+    expect(title.getAttribute('aria-haspopup')).toBe('dialog');
+    title.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(detail.current?.id).toBe('i1');
+    detail.drop();
+    title.focus();
+    await userEvent.keyboard(' ');
+    expect(detail.current?.id).toBe('i1');
+  });
+
+  it('detail: false hides the affordance (no title button, frame click does nothing)', async () => {
+    const { modules } = fakeRegistry();
+    const inner = modules.good!;
+    modules.good = { ...inner, load: () => Promise.resolve({ default: client('good', GoodTile as never, { detail: false }) }) };
+    renderHost(good, modules);
+    await userEvent.click(await screen.findByTestId('plain-area'));
+    expect(detail.current).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Good' })).toBeNull();
+    expect(document.querySelector('[data-openable]')).toBeNull();
   });
 });
 

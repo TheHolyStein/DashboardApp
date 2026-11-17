@@ -1,6 +1,5 @@
 
-import type { ChartPalette, InstanceDto, Mode, ModuleClient, ModuleId, ModuleManifest, TileSize } from '@dash/contract';
-import type { Component } from 'svelte';
+import { THEME_CONTEXT_KEY, type InstanceDto, type Mode, type ModuleClient, type ModuleId, type ModuleManifest, type ThemeSeam } from '@dash/contract';
 import type { z } from 'zod';
 import { moduleApi } from './api.js';
 import { t } from './i18n.js';
@@ -8,7 +7,6 @@ import { session } from './session.svelte.js';
 import { stream } from './stream.svelte.js';
 
 type Instance = z.infer<typeof InstanceDto>;
-type TileComponent = ModuleClient['Tile'];
 
 /** Registry entry as the hosts need it: the generated `clientModules` satisfies this; test registries may omit `load`. */
 export interface HostEntry {
@@ -17,20 +15,9 @@ export interface HostEntry {
 }
 export type HostRegistry = Record<ModuleId, HostEntry>;
 
-/** Svelte context key for the theme seam. The theme engine provides it; absent means no theme overrides. */
-export const THEME_KEY = 'dash:theme';
-export interface ThemeSeam {
-  /** A full tile replacement for the module at this size (theme `minSize` rules apply), or null to use the module's own tile. */
-  tileFor(moduleId: ModuleId, size?: TileSize): Promise<TileComponent | null>;
-  /** Identity of the active theme; reactive when present, so a theme switch re-resolves overrides. */
-  readonly id?: string;
-  clockFace?: (id?: string) => Promise<Component<any>>; // eslint-disable-line @typescript-eslint/no-explicit-any -- face props are the theme's contract
-  chart?: () => ChartPalette;
-  /** Current colour mode; read inside reactive code, so a getter keeps it live. */
-  readonly mode?: Mode;
-  /** Theme icon source; wins over module-provided icons for the same name. */
-  icon?: (name: string) => string | undefined;
-}
+/** Kept for existing importers; the key and the seam type live in `@dash/contract`. */
+export const THEME_KEY = THEME_CONTEXT_KEY;
+export type { ThemeSeam };
 
 export interface LoadedClient {
   client: ModuleClient;

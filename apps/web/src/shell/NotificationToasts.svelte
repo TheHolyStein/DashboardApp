@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../lib/i18n.js';
+  import { bodyOf, titleOf } from './notificationText.js';
   import { notifications } from '../lib/notifications.svelte.js';
 
   let { store = notifications }: { store?: typeof notifications } = $props();
@@ -13,7 +14,7 @@
   <div role="alert" class="region">
     {#each critical as toast (toast.key)}
       <div class="toast crit">
-        <span><strong>{toast.notification.title}</strong>{#if toast.notification.body} {toast.notification.body}{/if}</span>
+        <span><strong>{titleOf(toast.notification)}</strong>{#if bodyOf(toast.notification)} {bodyOf(toast.notification)}{/if}</span>
         <button type="button" aria-label={t('notifications.dismiss', 'Dismiss')} onclick={() => store.dismissToast(toast.key)}>✕</button>
       </div>
     {/each}
@@ -21,7 +22,7 @@
   <div role="status" class="region">
     {#each others as toast (toast.key)}
       <div class="toast {toast.notification.level === 'warn' ? 'warn' : 'info'}">
-        <span><strong>{toast.notification.title}</strong>{#if toast.notification.body} {toast.notification.body}{/if}</span>
+        <span><strong>{titleOf(toast.notification)}</strong>{#if bodyOf(toast.notification)} {bodyOf(toast.notification)}{/if}</span>
         <button type="button" aria-label={t('notifications.dismiss', 'Dismiss')} onclick={() => store.dismissToast(toast.key)}>✕</button>
       </div>
     {/each}

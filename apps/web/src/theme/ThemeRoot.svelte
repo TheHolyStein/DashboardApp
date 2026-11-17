@@ -1,7 +1,6 @@
 <script lang="ts">
   import { setContext, untrack, type Snippet } from 'svelte';
-  import { ICONS_KEY, T_KEY } from '@dash/ui';
-  import { THEME_KEY, type ThemeSeam } from '../lib/host.js';
+  import { ICONS_CONTEXT_KEY, T_CONTEXT_KEY, THEME_CONTEXT_KEY, type ThemeSeam } from '@dash/contract';
   import { session } from '../lib/session.svelte.js';
   import { theme } from './engine.svelte.js';
 
@@ -21,9 +20,9 @@
     },
   };
 
-  setContext(THEME_KEY, seam satisfies ThemeSeam);
-  setContext(ICONS_KEY, iconOrUndefined);
-  setContext(T_KEY, theme.t);
+  setContext(THEME_CONTEXT_KEY, seam satisfies ThemeSeam);
+  setContext(ICONS_CONTEXT_KEY, iconOrUndefined);
+  setContext(T_CONTEXT_KEY, theme.t);
 
   $effect(() => {
     const prefs = session.status === 'signedIn' ? session.me?.prefs : undefined;
