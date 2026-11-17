@@ -4,7 +4,7 @@ import { flushSync, type Component } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BackgroundHost, { resetFailedScenes } from '../../src/theme/BackgroundHost.svelte';
 import { createSceneEnv } from '../../src/theme/env.svelte.js';
-import { setUserIntensityOverride } from '../../src/theme/intensity.js';
+import { resetIntensitySessionForTests, setUserIntensityOverride } from '../../src/theme/intensity.js';
 import SceneA from './fixtures/Scene_a.svelte';
 import SceneB from './fixtures/Scene_b.svelte';
 import SceneC from './fixtures/Scene_c.svelte';
@@ -22,7 +22,7 @@ function scenes(spies: Record<string, ReturnType<typeof vi.fn>>, loaders: Record
   });
 }
 
-async function setup(opts: { loaders?: Record<string, Loader>; override?: Intensity | null; now?: string; tz?: string } = {}) {
+async function setup(opts: { loaders?: Record<string, Loader>; override?: Intensity | null; now?: string; tz?: string; assetUrl?: (themeId: string, path: string) => Promise<string> } = {}) {
   const spies: Record<string, ReturnType<typeof vi.fn>> = {};
   const loaders = opts.loaders ?? { a: comp(SceneA), b: comp(SceneB), c: comp(SceneC) };
   const manifest: ThemeManifest = { ...makeTheme('scenic'), backgrounds: scenes(spies, loaders) };
@@ -46,7 +46,7 @@ async function setup(opts: { loaders?: Record<string, Loader>; override?: Intens
     env,
     document: doc,
     timeZone: () => tz,
-    assetUrl: (themeId: string, path: string) => Promise.resolve(`/assets/${themeId}/${path}`),
+    assetUrl: opts.assetUrl ?? ((themeId: string, path: string) => Promise.resolve(`/assets/${themeId}/${path}`)),
     governor: {
       matchMedia: undefined,
       connection: undefined,
@@ -83,8 +83,11 @@ async function setup(opts: { loaders?: Record<string, Loader>; override?: Intens
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-call -- eslint cannot resolve a .svelte module export; svelte-check types it
-beforeEach(() => resetFailedScenes());
+beforeEach(() => {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- eslint cannot resolve a .svelte module export; svelte-check types it
+  resetFailedScenes();
+  resetIntensitySessionForTests();
+});
 afterEach(() => {
   setUserIntensityOverride(null);
   vi.restoreAllMocks();
@@ -218,5 +221,67 @@ describe('BackgroundHost', () => {
     await vi.waitFor(() => expect(t.raf.requested).toBe(1));
     t.view.unmount();
     expect(t.raf.cancelled).toBe(1);
+  });
+
+  it('requests no animation frame while the theme has no backgrounds', async () => {
+    const t = await setup({ loaders: {} });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.image()).toBeNull();
+    expect(t.raf.requested).toBe(0);
+  });
+
+  it('requests no animation frame while the scene is still loading', async () => {
+    const gate = new Promise<never>(() => {});
+    const t = await setup({ loaders: { a: () => gate } });
+    await vi.waitFor(() => expect(t.image()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.raf.requested).toBe(0);
+  });
+
+  it('requests no animation frame after the scene import failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const t = await setup({ loaders: { a: () => Promise.reject(new Error('chunk missing')) } });
+    await vi.waitFor(() => expect(t.image()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.raf.requested).toBe(0);
+  });
+
+  it('keeps no frame pending after a throwing scene fell back to its image', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const t = await setup({ loaders: { boom: comp(SceneThrows) } });
+    await vi.waitFor(() => expect(t.image()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.raf.requested).toBe(t.raf.cancelled);
+  });
+
+  it('requests no animation frame at level static', async () => {
+    const t = await setup({ override: 'static' });
+    await vi.waitFor(() => expect(t.image()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.raf.requested).toBe(0);
+  });
+
+  it('requests a frame once the scene is mounted and cancels it when hidden', async () => {
+    const t = await setup();
+    await vi.waitFor(() => expect(t.sceneIds()).toEqual(['a']));
+    expect(t.raf.requested).toBe(1);
+    t.setHidden(true);
+    await vi.waitFor(() => expect(t.sceneIds()).toEqual([]));
+    expect(t.raf.cancelled).toBe(1);
+  });
+
+  it('keeps the previous static image until the next one has resolved', async () => {
+    const pending = new Map<string, (url: string) => void>();
+    const t = await setup({
+      override: 'static',
+      assetUrl: (_theme, path) =>
+        path === 'a.webp' ? Promise.resolve('/assets/a') : new Promise<string>((r) => pending.set(path, r)),
+    });
+    await vi.waitFor(() => expect(t.image()?.getAttribute('src')).toBe('/assets/a'));
+    await t.view.rerender({ background: 'b' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.image()?.getAttribute('src')).toBe('/assets/a');
+    pending.get('b.webp')!('/assets/b');
+    await vi.waitFor(() => expect(t.image()?.getAttribute('src')).toBe('/assets/b'));
   });
 });

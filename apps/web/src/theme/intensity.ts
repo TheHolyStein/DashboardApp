@@ -16,6 +16,10 @@ export interface IntensityInputs {
 export const FPS_THRESHOLD = 30;
 export const FPS_WINDOW_MS = 3000;
 export const BATTERY_LOW_LEVEL = 0.2;
+/** After a scene becomes active its own mount cost is not judged: sampling starts after this long. */
+export const SETTLE_MS = 500;
+/** A frame gap longer than this (stalled main thread, occluded window) discards the window instead of judging it. */
+export const MAX_FRAME_GAP_MS = 1000;
 
 const ORDER: Intensity[] = ['static', 'calm', 'full'];
 const rank = (i: Intensity): number => ORDER.indexOf(i);
@@ -66,6 +70,13 @@ export interface GovernorDeps {
 }
 
 let moduleOverride: Intensity | null = null;
+/** Cap set by fps drops; shared by every governor in the page, so a remount does not reset it. */
+let sessionCap: Intensity = 'full';
+
+/** Test seam: forget the session's fps cap. */
+export function resetIntensitySessionForTests(): void {
+  sessionCap = 'full';
+}
 const running = new Set<{ refresh(): void }>();
 
 /** Set the user's intensity preference (`null` = automatic). Used by the Appearance settings (later task). */
@@ -92,8 +103,9 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
   const reducedQuery = deps.matchMedia?.('(prefers-reduced-motion: reduce)');
   let battery: BatteryLike | null = null;
   let started = false;
-  /** Cap set by fps drops; lives as long as the governor (= the page session). */
-  let fpsCap: Intensity = 'full';
+  let sceneActive = false;
+  let settleStart: number | null = null;
+  let lastFrame: number | null = null;
   let current: Intensity | null = null;
   let rafHandle: number | null = null;
   let windowStart: number | null = null;
@@ -112,12 +124,12 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
       avgFps: null,
       hidden: hidden(),
     });
-    return override ? base : lowest(base, fpsCap);
+    return override ? base : lowest(base, sessionCap);
   }
 
-  /** Sampling runs only while visible, automatic, and a scene animates (`full`/`calm`). */
+  /** Sampling runs only while visible, automatic, and a scene is mounted and animating (`full`/`calm`). */
   function sampling(): boolean {
-    return started && !hidden() && deps.userOverride() === null && current !== null && current !== 'static';
+    return started && sceneActive && !hidden() && deps.userOverride() === null && current !== null && current !== 'static';
   }
 
   function syncSampling(): void {
@@ -125,12 +137,15 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
       if (rafHandle === null) {
         windowStart = null;
         frames = 0;
+        lastFrame = null;
         rafHandle = deps.requestAnimationFrame(frame);
       }
     } else {
       if (rafHandle !== null) deps.cancelAnimationFrame(rafHandle);
       rafHandle = null;
       windowStart = null;
+      settleStart = null;
+      lastFrame = null;
       frames = 0;
     }
   }
@@ -138,7 +153,15 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
   function frame(): void {
     rafHandle = null;
     const t = deps.now();
-    if (windowStart === null) {
+    const gap = lastFrame === null ? 0 : t - lastFrame;
+    lastFrame = t;
+    if (settleStart === null) settleStart = t;
+    if (t - settleStart < SETTLE_MS) {
+      // the scene's own mount cost is not judged
+    } else if (gap > MAX_FRAME_GAP_MS) {
+      windowStart = t; // stalled: no judgement from a window containing the gap
+      frames = 0;
+    } else if (windowStart === null) {
       windowStart = t;
       frames = 0;
     } else {
@@ -149,7 +172,7 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
         windowStart = null;
         frames = 0;
         if (fps < FPS_THRESHOLD) {
-          fpsCap = lowerIntensity(current ?? 'full');
+          sessionCap = lowerIntensity(current ?? 'full');
           refresh(); // starts a fresh window when still sampling
           return;
         }
@@ -205,13 +228,23 @@ export function createIntensityGovernor(partial: Partial<GovernorDeps> & Pick<Go
     for (const c of cleanups.splice(0)) c();
     current = null;
     windowStart = null;
+    settleStart = null;
+    lastFrame = null;
     frames = 0;
+  }
+
+  /** The host reports whether a scene component is mounted and rendering; only then is the frame rate sampled. */
+  function setSceneActive(active: boolean): void {
+    if (sceneActive === active) return;
+    sceneActive = active;
+    syncSampling();
   }
 
   const api = {
     start,
     stop,
     refresh,
+    setSceneActive,
     /** Same as the module-level function, for callers holding a governor. */
     setUserIntensityOverride,
     get intensity(): Intensity | null {

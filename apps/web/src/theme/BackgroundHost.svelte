@@ -63,14 +63,16 @@
     hidden = doc.hidden;
   };
 
+  const governor = createIntensityGovernor({ document: doc, ...governorDeps, apply: (i) => engine.setIntensity(i) });
+
   // The governor and the minute ticker live exactly as long as this host.
   $effect(() => {
-    const governor = createIntensityGovernor({ document: doc, ...governorDeps, apply: (i) => engine.setIntensity(i) });
     doc.addEventListener('visibilitychange', onVisibility);
     onVisibility();
     governor.start();
     env.start();
     return () => {
+      governor.setSceneActive(false);
       governor.stop();
       env.stop();
       doc.removeEventListener('visibilitychange', onVisibility);
@@ -110,6 +112,8 @@
   $effect(() => {
     const s = scene;
     const k = key;
+    // drop the previously loaded scene component once the scene changed
+    if (untrack(() => loaded) && untrack(() => loaded?.key) !== k) loaded = null;
     if (!s || !wantScene) return;
     let cancelled = false;
     s.component().then(
@@ -127,7 +131,13 @@
   });
 
   const Scene = $derived(wantScene && loaded && loaded.key === key ? loaded.component : null);
-  const imageUrl = $derived(image && image.key === key ? image.url : null);
+  // keep showing the previous image until the new one has resolved (never an empty layer)
+  const imageUrl = $derived(scene && image ? image.url : null);
+
+  // Sample the frame rate only while a scene component is mounted and rendering.
+  $effect(() => {
+    governor.setSceneActive(Scene !== null);
+  });
 
   function report(id: string, e: unknown): void {
     if (reported.has(id)) return;

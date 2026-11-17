@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSceneEnv } from '../../src/theme/env.svelte.js';
 import {
   createIntensityGovernor,
+  resetIntensitySessionForTests,
   decideIntensity,
   setUserIntensityOverride,
   type BatteryLike,
@@ -38,7 +39,7 @@ describe('decideIntensity', () => {
 });
 
 /** Fake browser: manual rAF at a chosen frame rate, battery, media queries and visibility. */
-function rig(o: { battery?: () => Promise<BatteryLike>; reduced?: boolean; saveData?: boolean } = {}) {
+function rig(o: { battery?: () => Promise<BatteryLike>; reduced?: boolean; saveData?: boolean; scene?: boolean } = {}) {
   let clock = 1000;
   let nextHandle = 1;
   const pending = new Map<number, () => void>();
@@ -69,8 +70,12 @@ function rig(o: { battery?: () => Promise<BatteryLike>; reduced?: boolean; saveD
     apply: (i) => void applied.push(i),
   };
   const governor = createIntensityGovernor(deps);
+  if (o.scene !== false) governor.setSceneActive(true);
   return {
     governor,
+    /** Another governor on the same fake page (a remount). */
+    another: () => createIntensityGovernor(deps),
+    advance: (ms: number) => void (clock += ms),
     applied,
     doc,
     mq,
@@ -107,14 +112,17 @@ function rig(o: { battery?: () => Promise<BatteryLike>; reduced?: boolean; saveD
   };
 }
 
-afterEach(() => setUserIntensityOverride(null));
+afterEach(() => {
+  setUserIntensityOverride(null);
+  resetIntensitySessionForTests();
+});
 
 describe('createIntensityGovernor', () => {
   it('low fps drops one level and stays', () => {
     const r = rig();
     r.governor.start();
     expect(r.applied).toEqual(['full']);
-    r.run(20, 3600);
+    r.run(20, 4200);
     expect(r.applied).toEqual(['full', 'calm']);
     r.run(60, 10_000); // fast again: never climbs back
     expect(r.applied).toEqual(['full', 'calm']);
@@ -126,7 +134,7 @@ describe('createIntensityGovernor', () => {
   it('a second drop needs a fresh 3 s window and ends at static, which stops sampling', () => {
     const r = rig();
     r.governor.start();
-    r.run(20, 3200);
+    r.run(20, 3700);
     expect(r.applied).toEqual(['full', 'calm']);
     r.run(20, 2500); // less than a fresh window since the drop
     expect(r.applied).toEqual(['full', 'calm']);
@@ -222,7 +230,7 @@ describe('createIntensityGovernor', () => {
     r.run(60, 2000);
     r.setHidden(true);
     r.setHidden(false);
-    r.run(60, 2000); // 2 s + 2 s would span a window if the gap were kept; fresh window means no judgement yet
+    r.run(60, 2500); // 2.5 s + 2 s would span a window if the gap were kept; fresh window means no judgement yet
     expect(r.applied).toEqual(['full']);
   });
 
@@ -257,6 +265,107 @@ describe('createIntensityGovernor', () => {
     r.governor.stop();
     expect(r.pendingCount).toBe(0);
     expect(r.listenerCount).toBe(0);
+  });
+});
+
+describe('scene-gated sampling', () => {
+  it('requests no rAF while no scene is active, however long it runs', () => {
+    const r = rig({ scene: false });
+    r.governor.start();
+    expect(r.applied).toEqual(['full']);
+    expect(r.rafRequests).toBe(0);
+    expect(r.pendingCount).toBe(0);
+    r.advance(10_000);
+    r.setHidden(true);
+    r.setHidden(false);
+    expect(r.rafRequests).toBe(0);
+  });
+
+  it('requests no rAF at level static even with a scene active', () => {
+    const r = rig({ reduced: true });
+    r.governor.start();
+    expect(r.rafRequests).toBe(0);
+  });
+
+  it('starts sampling on setSceneActive(true), judging only after the 500 ms settle', () => {
+    const r = rig({ scene: false });
+    r.governor.start();
+    r.governor.setSceneActive(true);
+    expect(r.pendingCount).toBe(1);
+    r.run(20, 3400); // 500 settle + 2.9 s of window: no verdict yet
+    expect(r.applied).toEqual(['full']);
+    r.run(20, 400);
+    expect(r.applied).toEqual(['full', 'calm']);
+  });
+
+  it('slow frames inside the settle period are not judged', () => {
+    const r = rig({ scene: false });
+    r.governor.start();
+    r.governor.setSceneActive(true);
+    r.run(4, 500); // slow mount
+    r.run(60, 8000);
+    expect(r.applied).toEqual(['full']);
+  });
+
+  it('setSceneActive(false) cancels the pending frame and a new activation starts fresh', () => {
+    const r = rig();
+    r.governor.start();
+    r.run(60, 2000);
+    expect(r.pendingCount).toBe(1);
+    r.governor.setSceneActive(false);
+    expect(r.pendingCount).toBe(0);
+    const n = r.rafRequests;
+    r.run(60, 1000);
+    expect(r.rafRequests).toBe(n);
+    r.governor.setSceneActive(true);
+    r.run(60, 2800); // would have exceeded a window had the old one been kept
+    expect(r.applied).toEqual(['full']);
+  });
+
+  it('a 1500 ms gap between frames causes no drop and restarts the window', () => {
+    const r = rig();
+    r.governor.start();
+    r.run(60, 2500);
+    r.advance(1500); // stalled while still visible
+    r.run(60, 2900); // < 3 s of fresh window
+    expect(r.applied).toEqual(['full']);
+    r.run(60, 3000);
+    expect(r.applied).toEqual(['full']);
+  });
+
+  it('a stall inside an otherwise slow window still restarts it', () => {
+    const r = rig();
+    r.governor.start();
+    r.run(20, 2000);
+    r.advance(1500);
+    r.run(20, 2800);
+    expect(r.applied).toEqual(['full']);
+    r.run(20, 1000);
+    expect(r.applied).toEqual(['full', 'calm']);
+  });
+
+  it('steady 20 fps for a full window after the settle drops exactly one level', () => {
+    const r = rig();
+    r.governor.start();
+    r.run(20, 3700);
+    expect(r.applied).toEqual(['full', 'calm']);
+  });
+
+  it('the session cap survives a second governor and is cleared by the test reset', () => {
+    const r = rig();
+    r.governor.start();
+    r.run(20, 4200);
+    expect(r.applied).toEqual(['full', 'calm']);
+    r.governor.stop();
+    const second = r.another();
+    second.start();
+    expect(second.intensity).toBe('calm');
+    second.stop();
+    resetIntensitySessionForTests();
+    const third = r.another();
+    third.start();
+    expect(third.intensity).toBe('full');
+    third.stop();
   });
 });
 
