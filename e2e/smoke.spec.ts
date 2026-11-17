@@ -81,10 +81,7 @@ test('member sees no admin sections and gets no admin data', async ({ page, prob
   await expectNoProblems(problems);
 });
 
-// PRODUCT BUG: zod's `new Function('')` probe (shared i18n chunk) is reported as a CSP violation (script-src, eval).
-// Fix in apps/web: set `z.config({ jitless: true })` before the first parse so the probe never runs.
 test('security headers and CSP hold', async ({ page, problems }) => {
-  test.fail();
   const res = await page.goto('/');
   const headers = res?.headers() ?? {};
   const csp = headers['content-security-policy'] ?? '';
@@ -95,7 +92,7 @@ test('security headers and CSP hold', async ({ page, problems }) => {
   await page.getByRole('button', { name: 'Edit page' }).click();
   await page.getByRole('button', { name: 'Add module' }).click();
   await expect(page.getByText('No modules installed')).toBeVisible();
-  await expectNoProblems(problems, { allowZodEval: false });
+  await expectNoProblems(problems);
 });
 
 test('service worker never serves api', async ({ page, context }) => {

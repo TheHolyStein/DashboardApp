@@ -1,8 +1,13 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vite';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  // Every `import 'zod'` resolves to the shim, which configures zod (no eval probe) before any schema is built.
+  resolve: {
+    alias: [{ find: /^zod$/, replacement: fileURLToPath(new URL('./src/zod-shim.ts', import.meta.url)) }],
+  },
   plugins: [
     svelte(),
     VitePWA({

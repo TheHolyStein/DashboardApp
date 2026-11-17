@@ -47,25 +47,15 @@ export const test = base.extend<{ problems: Problems }>({
 export { expect };
 
 /**
- * Known, accepted console noise (everything else fails a test):
- * - the browser logs a failed resource for the 401 that `GET /api/me` answers before sign-in;
- * - PRODUCT BUG (reported, not fixed here): zod probes `new Function('')` in the shared i18n chunk, which the strict
- *   CSP (no `unsafe-eval`) reports as a violation although zod catches it. It shows up once per page load as a
- *   console error whose text is only the "Note that 'script-src' was not explicitly set" tail, and as a
- *   `securitypolicyviolation` event for directive `script-src` with blocked URI `eval`.
- *   The test "security headers and CSP hold" does NOT filter it and is marked test.fail() until the bug is fixed.
+ * Known, accepted console noise (everything else fails a test): the browser logs a failed resource for the 401
+ * that `GET /api/me` answers before sign-in. Nothing else is filtered; CSP violations always fail.
  */
 const EXPECTED_401 = /^Failed to load resource: the server responded with a status of 401 \(Unauthorized\)$/;
-const ZOD_EVAL_CONSOLE = /^ Note that 'script-src' was not explicitly set, so 'default-src' is used as a fallback\.$/;
-const ZOD_EVAL_VIOLATION = /^script-src eval$/;
 
-export async function expectNoProblems(problems: Problems, opts: { allowZodEval?: boolean } = {}): Promise<void> {
-  const allowZod = opts.allowZodEval ?? true;
-  expect(
-    problems.console.filter((m) => !EXPECTED_401.test(m) && !(allowZod && ZOD_EVAL_CONSOLE.test(m))),
-  ).toEqual([]);
+export async function expectNoProblems(problems: Problems): Promise<void> {
+  expect(problems.console.filter((m) => !EXPECTED_401.test(m))).toEqual([]);
   expect(problems.pageErrors).toEqual([]);
-  expect((await problems.csp()).filter((v) => !(allowZod && ZOD_EVAL_VIOLATION.test(v)))).toEqual([]);
+  expect(await problems.csp()).toEqual([]);
 }
 
 export async function signIn(page: Page, user: { name: string; password: string }): Promise<void> {
