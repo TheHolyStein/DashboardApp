@@ -92,12 +92,24 @@
   // Settings are for the page owner with edit level on the module (the server enforces both).
   const canConfigure = $derived(page.ownerId === session.me?.id && grantLevel(session.me?.grants, instance.moduleId) === 'edit');
 
-  const INTERACTIVE = 'a, button, input, select, textarea, [role=button], [data-no-open]';
+  const INTERACTIVE =
+    'a, button, input, select, textarea, label, summary, [contenteditable], [contenteditable=""], [role=button], [role=link], [role=switch], [role=checkbox], [role=tab], [role=menuitem], [data-no-open]';
+  // A press that moves more than this many px is a drag, not a click.
+  const DRAG_PX = 5;
   // Not while arranging tiles (drag/resize), and not before the client has loaded or if it has no detail view.
   const openable = $derived(allowed && hasDetail && !pages.editing);
   const open = (): void => detail.open(instance.id);
+  let pressAt: { x: number; y: number } | null = null;
+  function onFramePointerDown(e: PointerEvent): void {
+    pressAt = { x: e.clientX, y: e.clientY };
+  }
   function onFrameClick(e: MouseEvent): void {
+    const press = pressAt;
+    pressAt = null;
     if (!openable || !(e.target instanceof Element) || e.target.closest(INTERACTIVE)) return;
+    // Selecting text in the tile is not a click on the tile.
+    if (window.getSelection()?.toString()) return;
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_PX) return;
     open();
   }
 
@@ -106,7 +118,7 @@
 
 <!-- Mouse and touch: the whole frame opens the detail pane. Keyboard and assistive technology: the title button (Tile `onOpen`). -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="frame" class:openable data-openable={openable ? 'true' : undefined} onclick={onFrameClick}>
+<div class="frame" class:openable data-openable={openable ? 'true' : undefined} onpointerdown={onFramePointerDown} onclick={onFrameClick}>
 <Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined} onOpen={openable ? open : undefined}>
   {#if !allowed || !loading}
     <p class="unavailable" data-unavailable="true">{t('tile.unavailable', 'Module unavailable')}</p>

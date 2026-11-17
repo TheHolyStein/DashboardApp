@@ -28,6 +28,32 @@ describe('notifications', () => {
     expect(notified(env, 'alice')).toHaveLength(2);
   });
 
+  it('vars: invalid entries are dropped before the count cap; keys and string values are limited', async () => {
+    env = await makeEnv();
+    const vars: Record<string, unknown> = {};
+    for (let i = 0; i < 12; i++) vars[`bad${i}`] = { nested: i }; // invalid values come first
+    for (let i = 0; i < 12; i++) vars[`v${i}`] = i; // then 12 valid entries: only the first 10 survive
+    vars['bad key'] = 'space in key';
+    vars['k'.repeat(65)] = 'key too long';
+    vars['k'.repeat(64)] = 'max key';
+    vars['text'] = 'x'.repeat(600);
+    env.notifications.notify('demo', { level: 'info', title: 'V', vars: vars as never, userIds: ['alice'] });
+    const got = notified(env, 'alice').at(-1)!.ev.notification.vars as Record<string, unknown>;
+    expect(Object.keys(got)).toHaveLength(10);
+    expect(got).toMatchObject({ v0: 0, v9: 9 });
+    expect(got).not.toHaveProperty('v10');
+  });
+
+  it('vars: a valid key of 64 characters is kept, a 65-character key is dropped, strings are cut to 500', async () => {
+    env = await makeEnv();
+    env.notifications.notify('demo', {
+      level: 'info', title: 'L', vars: { ['k'.repeat(64)]: 'y'.repeat(600), ['k'.repeat(65)]: 'no', 'a b': 'no' }, userIds: ['alice'],
+    });
+    const got = notified(env, 'alice').at(-1)!.ev.notification.vars as Record<string, string>;
+    expect(Object.keys(got)).toEqual(['k'.repeat(64)]);
+    expect(got['k'.repeat(64)]).toBe('y'.repeat(500));
+  });
+
   it('dedupe after 24 h inserts a new row', async () => {
     env = await makeEnv();
     env.notifications.notify('demo', { level: 'info', title: 'One', dedupeKey: 'k', userIds: ['alice'] });

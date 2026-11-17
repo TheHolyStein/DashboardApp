@@ -13,6 +13,8 @@ const MODULE_WIDE = '\u0000module';
 /**
  * Dedupes `host.push`. State lives in the returned object, owned by the caller (create one per host, for
  * example inside `routes`/`jobs` setup or lazily per host); there is no module-level state.
+ * Comparison is by JSON text: build snapshots deterministically (stable key order); call `forget(instanceId)` when an
+ * instance is removed.
  */
 export function createSnapshotPusher(host: Pick<HostServices, 'push'>): SnapshotPusher {
   const last = new Map<string, string>();
@@ -22,8 +24,9 @@ export function createSnapshotPusher(host: Pick<HostServices, 'push'>): Snapshot
       const json = JSON.stringify(data) ?? 'undefined';
       const key = keyOf(instanceId);
       if (last.get(key) === json) return false;
-      last.set(key, json);
+      // Recorded only after a successful push: a throwing push is not remembered, so the next identical one goes out.
       host.push(instanceId, data);
+      last.set(key, json);
       return true;
     },
     forget: (instanceId) => void last.delete(keyOf(instanceId)),

@@ -22,7 +22,9 @@ export const TITLE_MAX = 200;
 export const BODY_MAX = 2000;
 export const KEY_MAX = 100;
 export const VARS_MAX = 10;
-export const VAR_VALUE_MAX = 200;
+export const VAR_KEY_MAX = 64;
+export const VAR_VALUE_MAX = 500;
+const KEY_PATTERN = /^[\w.-]+$/;
 export const DEDUPE_WINDOW_MS = 24 * 3600 * 1000;
 export const RETENTION_MS = 30 * 24 * 3600 * 1000;
 
@@ -53,18 +55,26 @@ interface Row {
 
 /** Translation key: a short dotted/dashed token, or null. */
 function cleanKey(k: unknown): string | null {
-  return typeof k === 'string' && k.length > 0 && k.length <= KEY_MAX && /^[\w.-]+$/.test(k) ? k : null;
+  return typeof k === 'string' && k.length > 0 && k.length <= KEY_MAX && KEY_PATTERN.test(k) ? k : null;
 }
 
-/** Template variables: at most VARS_MAX entries of finite numbers or (capped) strings, else null. */
+/**
+ * Template variables: finite numbers or strings (cut to VAR_VALUE_MAX) under keys that match the key rule
+ * (at most VAR_KEY_MAX characters). Invalid entries are dropped first, then at most VARS_MAX valid entries are kept.
+ */
 function cleanVars(v: unknown): Record<string, string | number> | null {
   if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
   const out: Record<string, string | number> = {};
-  for (const [k, val] of Object.entries(v).slice(0, VARS_MAX)) {
+  let count = 0;
+  for (const [k, val] of Object.entries(v)) {
+    if (count >= VARS_MAX) break;
+    if (k.length > VAR_KEY_MAX || !KEY_PATTERN.test(k)) continue;
     if (typeof val === 'string') out[k] = val.slice(0, VAR_VALUE_MAX);
     else if (typeof val === 'number' && Number.isFinite(val)) out[k] = val;
+    else continue;
+    count++;
   }
-  return Object.keys(out).length > 0 ? out : null;
+  return count > 0 ? out : null;
 }
 
 function parseVars(json: string | null): Record<string, string | number> | null {

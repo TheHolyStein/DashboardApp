@@ -73,7 +73,9 @@ modules/<id>/
 
 **Contract v2 helpers** (use these instead of rolling your own; details in `docs/contract-changes/002-v2-from-clock.md`):
 - `newId(host.now())` from `@dash/module-kit`: uuid v7, time-ordered. No `crypto.randomUUID()` for ids.
+  `newId()` ids are time-ordered between milliseconds but not within one; order by `created_at`, not by id.
 - `createSnapshotPusher(host)` from `@dash/module-kit`: `push(instanceId | null, data)` sends only when the JSON changed (returns `false` otherwise); `forget(id)` on instance removal. Create it where you register routes/jobs; never in module-level state.
+  Snapshot pusher compares JSON text — build snapshot objects with a stable key order.
 - Typed route bodies: `r.post('/x', { level: 'edit', body: Schema }, (req) => … req.body …)` gives `req.body` as `z.infer<typeof Schema>` (same for `query`). Handlers may return a value, a promise, or `undefined` (204). No re-parsing, no casts, no `Promise.resolve` wrapper.
 - `applyMigrations` (mock host) runs every statement of a migration like the real runner: put a table and its index in one migration.
 - Notification text keys: `host.notify({ level, title, body, titleKey: 'm.<id>.notify.x', bodyKey?, vars?: { label } })`. `title`/`body` stay the English fallback (also what Web Push shows); the dashboard renders `t(titleKey, title, vars)`.

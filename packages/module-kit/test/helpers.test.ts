@@ -44,6 +44,23 @@ describe('createSnapshotPusher', () => {
     p.forgetAll();
     expect(p.push(null, 1)).toBe(true);
   });
+  it('a push that throws is not recorded, so the identical push after it still goes out', () => {
+    const sent: Array<{ instanceId: string | null; data: unknown }> = [];
+    let failNext = true;
+    const p = createSnapshotPusher({
+      push: (instanceId, data) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error('host down');
+        }
+        sent.push({ instanceId, data });
+      },
+    });
+    expect(() => p.push('i1', { a: 1 })).toThrow('host down');
+    expect(p.push('i1', { a: 1 })).toBe(true);
+    expect(p.push('i1', { a: 1 })).toBe(false);
+    expect(sent).toEqual([{ instanceId: 'i1', data: { a: 1 } }]);
+  });
   it('state is per pusher', () => {
     const host = createMockHost(goodManifest);
     expect(createSnapshotPusher(host).push('i', 1)).toBe(true);

@@ -10,6 +10,8 @@ import ThrowsWhenSmall from './sample-module/negative/ThrowsWhenSmall.svelte';
 import ThrowsAlways from './sample-module/negative/ThrowsAlways.svelte';
 import HardcodedWhenEmpty from './sample-module/negative/HardcodedWhenEmpty.svelte';
 import Substring from './sample-module/negative/Substring.svelte';
+import DataValue from './sample-module/negative/DataValue.svelte';
+import DataValueProse from './sample-module/negative/DataValueProse.svelte';
 
 const opts = {
   moduleDir: path.join(import.meta.dirname, 'sample-module', 'good'),
@@ -62,5 +64,13 @@ describe('client contract cases fail for the matching fault', () => {
 
   test('all visible text goes through t(): fixture exemption matches whole tokens only', async () => {
     expect(await failedCases(withTile(Substring))).toContain('all visible text goes through t()');
+  });
+
+  test('all visible text goes through t(): a data-value span holding a sentence fails', async () => {
+    expect(await failedCases(withTile(DataValueProse))).toContain('all visible text goes through t()');
+  });
+
+  test('all visible text goes through t(): a data-value span holding a formatted time passes', async () => {
+    expect(await failedCases(withTile(DataValue))).not.toContain('all visible text goes through t()');
   });
 });

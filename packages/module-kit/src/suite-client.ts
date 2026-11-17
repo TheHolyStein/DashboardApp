@@ -41,14 +41,20 @@ function collectStrings(value: unknown, out: string[]): string[] {
   return out;
 }
 
-/** Visible text nodes, except text inside an element with the `data-value` attribute (formatted numbers, times, dates are data, not words). */
-function textNodes(root: Node): string[] {
+/** Two or more words of three or more letters: a sentence, not a formatted value ("Thu 12:30 PM", "3.5 km" do not match). */
+const PROSE = /\p{L}{3,}\s+\p{L}{3,}/u;
+
+/**
+ * Visible text nodes. Text inside a `data-value` element is data (formatted numbers, times, dates) and is skipped,
+ * unless it reads as prose: that is reported separately as an offender by the caller.
+ */
+function textNodes(root: Node): Array<{ text: string; dataValue: boolean }> {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const out: string[] = [];
+  const out: Array<{ text: string; dataValue: boolean }> = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (n.parentElement?.closest('[data-value]')) continue;
     const text = n.textContent?.trim();
-    if (text) out.push(text);
+    if (!text) continue;
+    out.push({ text, dataValue: n.parentElement?.closest('[data-value]') != null });
   }
   return out;
 }
@@ -119,7 +125,11 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
   );
   const checkTexts = (what: string, container: HTMLElement): void => {
     const offenders: string[] = [];
-    for (const text of textNodes(container)) {
+    for (const { text, dataValue } of textNodes(container)) {
+      if (dataValue) {
+        if (PROSE.test(text)) offenders.push(`${what}: data-value text reads as prose, use t() for "${text}"`);
+        continue;
+      }
       const leftover = text.replace(new RegExp(`${MARK_OPEN}[^${MARK_CLOSE}]*${MARK_CLOSE}`, 'g'), ' ');
       const bare = tokenize(leftover).filter((w) => !fixtureTokens.has(w));
       if (bare.length > 0) offenders.push(`${what}: "${text}"`);

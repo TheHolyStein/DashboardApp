@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stream } from '../../src/lib/stream.svelte.js';
@@ -16,10 +16,17 @@ import { session } from '../../src/lib/session.svelte.js';
 import { lookupIcon } from '../../src/lib/host.js';
 import { makeMe, signIn } from './helpers.js';
 import { inst, page } from './pageFixtures.js';
+import ClickTile from './ClickTile.svelte';
 
 const good = inst('i1', { moduleId: 'good', settings: { label: 'hello' }, layout: { x: 0, y: 0, w: 4, h: 3 } });
 const boom = inst('i2', { moduleId: 'boom' });
 const pg = page('p1', [good, boom]);
+
+/** Swaps the `good` module for a tile with selectable text, a label and a button (selection, drag and label cases). */
+function withClickTile(modules: HostRegistry): HostRegistry {
+  const inner = modules.good!;
+  return { ...modules, good: { ...inner, load: () => Promise.resolve({ default: client('good', ClickTile as never) }) } };
+}
 
 function renderHost(instance: typeof good, modules: HostRegistry, theme?: ThemeSeam) {
   return render(TileHost, {
@@ -196,6 +203,48 @@ describe('TileHost detail affordance', () => {
     renderHost(good, modules);
     await userEvent.click(await screen.findByTestId('plain-area'));
     expect(detail.current).toEqual({ id: 'i1', params: {} });
+  });
+
+  it('a click while text is selected inside the tile does not open the pane', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, withClickTile(modules));
+    const el = await screen.findByTestId('sel-text');
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    expect(window.getSelection()?.toString()).toBe('Select this sentence');
+    try {
+      await fireEvent.click(screen.getByTestId('plain-area'));
+      expect(detail.current).toBeNull();
+    } finally {
+      window.getSelection()?.removeAllRanges();
+    }
+  });
+
+  it('a drag (pointer moved more than 5 px between pointerdown and click) does not open the pane', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, withClickTile(modules));
+    const area = await screen.findByTestId('plain-area');
+    await fireEvent.pointerDown(area, { clientX: 0, clientY: 0 });
+    await fireEvent.click(area, { clientX: 20, clientY: 0 });
+    expect(detail.current).toBeNull();
+  });
+
+  it('a click within 5 px of the pointerdown position still opens the pane', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, withClickTile(modules));
+    const area = await screen.findByTestId('plain-area');
+    await fireEvent.pointerDown(area, { clientX: 0, clientY: 0 });
+    await fireEvent.click(area, { clientX: 3, clientY: 4 });
+    expect(detail.current).toEqual({ id: 'i1', params: {} });
+  });
+
+  it('a click on a label inside the tile does not open the pane', async () => {
+    const { modules } = fakeRegistry();
+    renderHost(good, withClickTile(modules));
+    await fireEvent.click(await screen.findByTestId('lbl-text'));
+    expect(detail.current).toBeNull();
   });
 
   it('clicking a button or a [data-no-open] element inside the tile does not open it', async () => {
