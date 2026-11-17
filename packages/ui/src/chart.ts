@@ -107,6 +107,9 @@ function sameTimestamps(series: ChartSeries[]): boolean {
  * Downsample every series and align them on one sorted x axis in epoch SECONDS (uPlot's unit).
  * Series sharing identical timestamps are reduced on one shared selection (LTTB on the series with most data), so
  * they stay aligned without holes. Otherwise holes are `undefined`; only real gaps are `null`.
+ * Trade-off: the shared selection is driven by the series with the most non-null points, so a one-sample spike that
+ * exists only in another series can be dropped by downsampling. Modules that must show such spikes should
+ * pre-aggregate (min/max per bucket) server-side. Gap boundaries of every series are always kept.
  */
 export function mergeSeries(series: ChartSeries[], maxPoints: number): Merged {
   let reduced: Point[][];
@@ -119,7 +122,22 @@ export function mergeSeries(series: ChartSeries[], maxPoints: number): Merged {
     }
     const keep = new Set<number>();
     for (const p of downsample(rep.points, maxPoints)) keep.add(p[0]);
-    reduced = series.map((s) => s.points.filter((p) => keep.has(p[0])));
+    // Every series keeps its gap boundaries (each null next to a non-null, plus that non-null neighbour), so a real
+    // outage in any series stays a null for uPlot instead of being bridged by a line.
+    for (const s of series) {
+      const pp = s.points;
+      for (let i = 0; i < pp.length; i++) {
+        if (!isGap(pp[i] as Point)) continue;
+        const prev = pp[i - 1];
+        const next = pp[i + 1];
+        if (prev && !isGap(prev)) { keep.add((pp[i] as Point)[0]); keep.add(prev[0]); }
+        if (next && !isGap(next)) { keep.add((pp[i] as Point)[0]); keep.add(next[0]); }
+      }
+    }
+    // Many gaps would push the shared selection far past the budget: fall back to the per-series path below
+    // (alignment holes are `undefined`, so the series stay drawable) rather than exceed maxPoints without bound.
+    if (keep.size <= maxPoints * 1.5) reduced = series.map((s) => s.points.filter((p) => keep.has(p[0])));
+    else reduced = series.map((s) => downsample(s.points, maxPoints));
   } else {
     reduced = series.map((s) => downsample(s.points, maxPoints));
   }
@@ -134,15 +152,18 @@ export function mergeSeries(series: ChartSeries[], maxPoints: number): Merged {
   return { x: xms.map((t) => t / 1000), ys };
 }
 
-/** Cheap change detector for merged data: shape, extremes and a rolling sum (no deep compare). */
-export function dataSignature(m: Merged): string {
-  const parts: Array<string | number> = [m.ys.length, m.x.length, m.x[0] ?? '', m.x[m.x.length - 1] ?? ''];
-  for (const ys of m.ys) {
-    let sum = 0;
-    for (const v of ys) sum = typeof v === 'number' ? (sum * 31 + v) % 1e12 : sum + (v === null ? 7 : 3);
-    parts.push(ys.length, ys[ys.length - 1] ?? 'u', sum);
+/** Exact, allocation-free equality of two merged datasets (`Object.is`, so null/undefined and NaN are distinguished). */
+export function sameMerged(a: Merged, b: Merged): boolean {
+  if (a === b) return true;
+  if (a.x.length !== b.x.length || a.ys.length !== b.ys.length) return false;
+  for (let i = 0; i < a.x.length; i++) if (!Object.is(a.x[i], b.x[i])) return false;
+  for (let k = 0; k < a.ys.length; k++) {
+    const ya = a.ys[k] as YValue[];
+    const yb = b.ys[k] as YValue[];
+    if (ya.length !== yb.length) return false;
+    for (let i = 0; i < ya.length; i++) if (!Object.is(ya[i], yb[i])) return false;
   }
-  return parts.join('|');
+  return true;
 }
 
 export const hasAnyData = (series: ChartSeries[]): boolean => series.some((s) => s.points.some((p) => !isGap(p)));

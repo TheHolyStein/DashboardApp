@@ -118,6 +118,36 @@ describe('mergeSeries', () => {
   });
 });
 
+describe('mergeSeries gaps with a shared selection', () => {
+  const N = 1000;
+  const a = Array.from({ length: N }, (_, i): Point => [i * 1000, Math.sin(i / 15)]);
+
+  it('keeps the gap of a non-representative series (first and last null, real values on both sides)', () => {
+    const b = Array.from({ length: N }, (_, i): Point => [i * 1000, i >= 500 && i < 520 ? null : Math.cos(i / 7)]);
+    const m = mergeSeries([{ label: 'a', points: a }, { label: 'b', points: b }], 100);
+    const at = (ys: Array<number | null | undefined>, i: number) => ys[m.x.indexOf(i)];
+    const bys = m.ys[1] as Array<number | null | undefined>;
+    const ays = m.ys[0] as Array<number | null | undefined>;
+    expect(at(bys, 500)).toBeNull();
+    expect(at(bys, 519)).toBeNull();
+    expect(typeof at(bys, 499)).toBe('number');
+    expect(typeof at(bys, 520)).toBe('number');
+    for (const i of [499, 500, 519, 520]) expect(typeof at(ays, i)).toBe('number');
+    expect(m.x.length).toBeLessThanOrEqual(150);
+    for (const ys of m.ys) expect(ys.every((v) => v !== undefined)).toBe(true);
+  });
+
+  it('falls back to per-series downsampling when many gaps exceed 150% of maxPoints', () => {
+    const b = Array.from({ length: N }, (_, i): Point => [i * 1000, i % 50 >= 20 && i % 50 < 22 ? null : Math.cos(i / 7)]);
+    const m = mergeSeries([{ label: 'a', points: a }, { label: 'b', points: b }], 100);
+    for (const [k, pts2] of [a, b].entries()) {
+      const defined = (m.ys[k] as Array<number | null | undefined>).filter((v) => v !== undefined).length;
+      expect(defined).toBe(downsample(pts2, 100).length);
+    }
+    expect((m.ys[1] as Array<number | null | undefined>).includes(null)).toBe(true);
+  });
+});
+
 describe('Chart', () => {
   it('empty series shows Empty', () => {
     const spy = vi.fn(loadPlot);
@@ -240,8 +270,57 @@ describe('Chart', () => {
     expect(lastPlot().opts.series).toHaveLength(2);
     await r.rerender({ series: [{ label: 'renamed', points: pts([1, 2]) }] });
     flushSync();
-    expect(FakePlot.instances).toHaveLength(4);
-    expect(lastPlot().setData).not.toHaveBeenCalled();
+    expect(FakePlot.instances).toHaveLength(3); // a label change alone applies in place (see the label test below)
+  });
+
+  it('a label change alone neither re-creates the plot nor shows the placeholder, and tooltip and aria-label use the new label', async () => {
+    const r = await mount({ series: [{ label: 'CPU 10%', points: pts([1, 2, 3]) }], unit: '%' });
+    const first = lastPlot();
+    expect(r.container.querySelector('.placeholder')).toBeNull();
+    await r.rerender({ series: [{ label: 'CPU 11%', points: pts([1, 2, 3]) }], unit: '%' });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(1);
+    expect(first.destroy).not.toHaveBeenCalled();
+    expect(first.setData).not.toHaveBeenCalled();
+    expect(r.container.querySelector('.placeholder')).toBeNull();
+    expect(first.series[1].label).toBe('CPU 11%');
+    first.opts.hooks.setCursor[0]({ cursor: { idx: 1, left: 10, top: 5 }, data: first.data, over: undefined });
+    const tip = r.container.querySelector('.tip') as HTMLElement;
+    expect(tip.textContent).toContain('CPU 11%: 2%');
+    expect(tip.textContent).not.toContain('CPU 10%');
+    const aria = r.container.querySelector('[role="img"]')?.getAttribute('aria-label') ?? '';
+    expect(aria).toContain('CPU 11%');
+    expect(aria).not.toContain('CPU 10%');
+  });
+
+  it('re-creates the plot when only the series count changes, and when kind changes', async () => {
+    const r = await mount({ series: two(2) });
+    await r.rerender({ series: two(3) });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(2);
+    await r.rerender({ kind: 'area', series: two(3) });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(3);
+  });
+
+  it('setData runs for a 1e-9 change and for null to undefined, not for identical data', async () => {
+    const big = [1e6, 2e6, 3e6, 4e6, 5e6];
+    const r = await mount({ series: [{ label: 'a', points: pts(big) }] });
+    const p = lastPlot();
+    await r.rerender({ series: [{ label: 'a', points: pts(big) }] });
+    flushSync();
+    expect(p.setData).not.toHaveBeenCalled();
+    await r.rerender({ series: [{ label: 'a', points: pts([1e6, 2e6 + 1e-9, 3e6, 4e6, 5e6]) }] });
+    flushSync();
+    expect(p.setData).toHaveBeenCalledTimes(1);
+
+    FakePlot.instances = [];
+    const r2 = await mount({ series: [{ label: 'a', points: pts([1, null, 3]) }, { label: 'b', points: [[T0 + 60_000, 5]] as Point[] }] });
+    const q = lastPlot();
+    await r2.rerender({ series: [{ label: 'a', points: [[T0, 1], [T0 + 120_000, 3]] as Point[] }, { label: 'b', points: [[T0 + 60_000, 5]] as Point[] }] });
+    flushSync();
+    expect(q.setData).toHaveBeenCalledTimes(1);
+    expect(q.data[1][1]).toBeUndefined();
   });
 
   it('skips setData when the data did not change', async () => {

@@ -4,9 +4,9 @@
   import Empty from './Empty.svelte';
   import { useT } from './context.js';
   import {
-    DEFAULT_PALETTE, THEME_KEY, applyPalette, buildOptions, dataSignature, defaultLoadPlot, hasAnyData, mergeSeries,
+    DEFAULT_PALETTE, THEME_KEY, applyPalette, buildOptions, defaultLoadPlot, hasAnyData, mergeSeries, sameMerged,
     prefersReducedEffects, renderTooltip, summaryLabel, tooltipModel,
-    type ChartKind, type ChartSeries, type LivePalette, type LoadPlot, type PlotLike, type PlotModule,
+    type ChartKind, type ChartSeries, type LivePalette, type Merged, type LoadPlot, type PlotLike, type PlotModule,
   } from './chart.js';
 
   interface Props {
@@ -47,8 +47,7 @@
 
   let plot: PlotLike | undefined;
   let width = 0;
-  let plotData: unknown;
-  let plotSig = '';
+  let plotData: Merged | undefined;
   let live: LivePalette | undefined;
   let appliedPalette: ChartPalette | undefined;
 
@@ -78,8 +77,9 @@
     tip.style.top = `${Math.max(0, Math.min(top, Math.max(0, maxH)))}px`;
   }
 
-  // Series count and ordered labels: a different shape needs a different plot (setData cannot add/remove series).
-  const shapeKey = $derived(`${series.length}\u0000${series.map((s) => s.label).join('\u0000')}`);
+  // Series count: a different count needs a different plot (setData cannot add/remove series). Labels are not part of
+  // it: they are applied in place below, so a label that carries a live value never re-creates the plot.
+  const countD = $derived(series.length);
 
   function touchPos(over: HTMLElement, ev: Event): { left: number; top: number } | null {
     const touch = (ev as TouchEvent).touches?.[0];
@@ -94,7 +94,7 @@
     const el = plotEl;
     const k = kindD;
     const ht = h;
-    void localeD; void zoneD; void unitD; void shapeKey;
+    void localeD; void zoneD; void unitD; void countD;
     if (!M || !el || !hasData) return;
     return untrack(() => {
       const data = merged;
@@ -104,7 +104,6 @@
         locale, timeZone, mod: M, live, onCursor,
       });
       plotData = data;
-      plotSig = dataSignature(data);
       appliedPalette = palette;
       const p = new M(opts, [data.x, ...data.ys], el);
       plot = p;
@@ -144,11 +143,19 @@
     const data = merged;
     untrack(() => {
       if (!plot || data === plotData) return;
+      const prev = plotData;
       plotData = data;
-      const sig = dataSignature(data);
-      if (sig === plotSig) return;
-      plotSig = sig;
+      if (prev && sameMerged(prev, data)) return;
       plot.setData([data.x, ...data.ys]);
+    });
+  });
+
+  // Label change (same count) -> update the series objects in place; tooltip and aria-label read `series` live.
+  $effect(() => {
+    const labels = series.map((s) => s.label);
+    untrack(() => {
+      if (!plot) return;
+      labels.forEach((l, i) => { const s = plot?.series[i + 1]; if (s && s.label !== l) s.label = l; });
     });
   });
 
