@@ -300,6 +300,13 @@ const NEUTRAL_PAINT = /^(none|currentcolor|inherit|transparent|url\(\s*#[^)\s]+\
 
 /** Parses the markup as XML and applies an element allow-list and attribute rules to every node. */
 function iconProblems(svg: string): string[] {
+  if (typeof DOMParser === 'undefined') {
+    return ['theme tests need the jsdom environment (`// @vitest-environment jsdom`)'];
+  }
+  // The shell renders icons with the HTML parser, which reads comments, processing instructions and
+  // declarations differently from XML, so none of them is allowed at all.
+  const raw = rawMarkupProblems(svg);
+  if (raw.length > 0) return raw;
   const problems: string[] = [];
   let doc: Document;
   try {
@@ -312,8 +319,17 @@ function iconProblems(svg: string): string[] {
   const root = doc.documentElement;
   if (root.localName.toLowerCase() !== 'svg') return [`must be a single <svg> element (found <${root.localName}>)`];
 
+  if (doc.doctype) problems.push('contains a doctype');
   for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
     const name = el.localName.toLowerCase();
+    for (const node of Array.from(el.childNodes)) {
+      if (node.nodeType === 8) problems.push('contains a comment');
+      else if (node.nodeType === 7) problems.push('contains a processing instruction');
+      else if (node.nodeType === 4) problems.push('contains a CDATA section');
+      else if (node.nodeType === 3 && (node.textContent ?? '').trim() !== '' && name !== 'title' && name !== 'desc') {
+        problems.push(`<${el.localName}> contains text "${(node.textContent ?? '').trim()}"; text is only allowed in <title> and <desc>`);
+      } else if (node.nodeType !== 1 && node.nodeType !== 3) problems.push(`contains a node of type ${node.nodeType}`);
+    }
     const label = el.prefix ? `${el.prefix}:${el.localName}` : el.localName;
     if (el.prefix || (el.namespaceURI !== null && el.namespaceURI !== SVG_NS) || !ALLOWED_ELEMENTS.has(name)) {
       problems.push(`<${label}> is not allowed (allowed: ${[...ALLOWED_ELEMENTS].join(', ')})`);
@@ -335,6 +351,37 @@ function iconProblems(svg: string): string[] {
       }
     }
   }
+  if (problems.length > 0) return problems;
+  // Defence in depth: what the browser's HTML parser makes of the original and of the re-serialised icon.
+  return [...htmlCrossCheck(svg.trim()), ...htmlCrossCheck(new XMLSerializer().serializeToString(root))];
+}
+
+/** Parses markup with the HTML parser (as the shell's `{@html}` does) and reports unexpected elements or on* attributes. */
+export function htmlCrossCheck(markup: string): string[] {
+  const problems: string[] = [];
+  const html = new DOMParser().parseFromString(markup, 'text/html');
+  for (const el of Array.from(html.documentElement.querySelectorAll('*'))) {
+    const name = el.localName.toLowerCase();
+    if (name === 'head' || name === 'body') continue;
+    if (!ALLOWED_ELEMENTS.has(name)) problems.push(`the HTML parser reads this icon as containing <${name}>, which is not allowed`);
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.toLowerCase().startsWith('on')) {
+        problems.push(`the HTML parser reads this icon as having the event attribute ${attr.name} on <${name}>`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Checks on the raw string, before any parsing. */
+function rawMarkupProblems(svg: string): string[] {
+  const problems: string[] = [];
+  if (/<!--/.test(svg)) problems.push('contains a comment');
+  if (/<!\[CDATA\[/i.test(svg)) problems.push('contains a CDATA section');
+  if (/<!doctype/i.test(svg)) problems.push('contains a doctype');
+  if (/<!ENTITY|<!ELEMENT|<!ATTLIST/i.test(svg)) problems.push('contains an entity or other declaration');
+  if (/<\?/.test(svg)) problems.push('contains a processing instruction (including the <?xml ... ?> prolog)');
+  if (problems.length === 0 && /<!/.test(svg)) problems.push('contains a markup declaration (<!...)');
   return problems;
 }
 
