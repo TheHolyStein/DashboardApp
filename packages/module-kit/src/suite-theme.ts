@@ -57,8 +57,8 @@ function tokenBlock(css: string, themeId: string, mode: Mode): Record<string, st
   const out: Record<string, string> = {};
   for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selectors = (m[1] ?? '').split(',').map((s) => s.replace(/["'\s]/g, ''));
-    const want = `[data-theme=${themeId}][data-mode=${mode}]`;
-    if (!selectors.some((s) => s.includes(want))) continue;
+    const want = `:root[data-theme=${themeId}][data-mode=${mode}]`;
+    if (!selectors.some((s) => s === want)) continue;
     found = true;
     for (const d of (m[2] ?? '').matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)) out[d[1] ?? ''] = (d[2] ?? '').trim();
   }
@@ -98,6 +98,16 @@ function parseChannel(s: string): number {
   return clamp(n, 0, 255);
 }
 
+/** Hue in degrees, from a bare number or a `deg`, `grad`, `rad` or `turn` value. Throws when unparsable. */
+function parseHue(s: string): number {
+  const m = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(deg|grad|rad|turn)?$/i.exec(s.trim());
+  if (!m) throw new Error('bad hue');
+  const n = parseFloat(m[1] ?? '');
+  const unit = (m[2] ?? 'deg').toLowerCase();
+  const deg = unit === 'turn' ? n * 360 : unit === 'rad' ? (n * 180) / Math.PI : unit === 'grad' ? n * 0.9 : n;
+  return ((deg % 360) + 360) % 360;
+}
+
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   const a = s * Math.min(l, 1 - l);
   const f = (n: number): number => {
@@ -108,7 +118,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 }
 
 /** Parses the supported colour syntaxes; throws on anything else. */
-function parseColour(value: string): Rgba {
+export function parseColour(value: string): Rgba {
   const v = value.trim();
   const hex = /^#([0-9a-f]{3,8})$/i.exec(v)?.[1];
   if (hex !== undefined) {
@@ -140,9 +150,9 @@ function parseColour(value: string): Rgba {
     if (name.startsWith('rgb')) {
       return { r: parseChannel(p0), g: parseChannel(p1), b: parseChannel(p2), a: parseAlpha(p3) };
     }
-    const h = (((parseFloat(p0) % 360) + 360) % 360) || 0;
+    const h = parseHue(p0);
     const [r, g, b] = hslToRgb(h, clamp(parseFloat(p1), 0, 100) / 100, clamp(parseFloat(p2), 0, 100) / 100);
-    if ([h, r, g, b].some(Number.isNaN)) throw new Error('bad hsl');
+    if ([r, g, b].some(Number.isNaN)) throw new Error('bad hsl');
     return { r, g, b, a: parseAlpha(p3) };
   }
   throw new Error('unsupported syntax');
@@ -175,13 +185,13 @@ function luminance(c: Rgba): number {
 }
 
 /** WCAG 2.x contrast ratio of two opaque colours. */
-function contrastRatio(a: Rgba, b: Rgba): number {
+export function contrastRatio(a: Rgba, b: Rgba): number {
   const la = luminance(a);
   const lb = luminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-function over(fg: Rgba, bg: Rgba): Rgba {
+export function over(fg: Rgba, bg: Rgba): Rgba {
   return {
     r: fg.r * fg.a + bg.r * (1 - fg.a),
     g: fg.g * fg.a + bg.g * (1 - fg.a),
@@ -193,7 +203,7 @@ function over(fg: Rgba, bg: Rgba): Rgba {
 // ----------------------------------------------------------------------------------- pending-work probe
 
 /** Records requestAnimationFrame / setTimeout / setInterval calls that were neither run nor cleared. */
-function installPendingProbe(): { pending: () => string[]; restore: () => void } {
+function installPendingProbe(): { pending: () => string[]; settle: () => Promise<void>; restore: () => void } {
   const g = globalThis as unknown as Record<string, (...a: unknown[]) => unknown>;
   const names = ['requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'];
   const originals = new Map<string, unknown>(names.map((n) => [n, g[n]]));
@@ -233,6 +243,15 @@ function installPendingProbe(): { pending: () => string[]; restore: () => void }
 
   return {
     pending: () => [...pending.values()],
+    // Two microtasks and one real zero-delay timer (the original, so it is not counted), so work a scene
+    // schedules from a promise or a timer callback has happened before we judge.
+    settle: async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise<void>((resolve) => {
+        orig('setTimeout')(resolve, 0);
+      });
+    },
     restore: () => {
       // Clear real timers we left running so the test process does not hang on them.
       for (const [h, kind] of pending) {
@@ -271,41 +290,50 @@ function svelteFiles(dir: string): string[] {
 
 // -------------------------------------------------------------------------------------------- SVG icons
 
-const DRAWABLE = new Set(['path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse']);
-const NEUTRAL_PAINT = /^(none|currentcolor|inherit|transparent|var\(.*|url\(.*)$/i;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ALLOWED_ELEMENTS = new Set(
+  ['svg', 'g', 'path', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'rect', 'title', 'desc', 'defs', 'clipPath', 'mask',
+    'linearGradient', 'radialGradient', 'stop', 'use', 'symbol'].map((n) => n.toLowerCase()),
+);
+const PAINT_ATTRIBUTES = new Set(['fill', 'stroke', 'stop-color', 'color']);
+const NEUTRAL_PAINT = /^(none|currentcolor|inherit|transparent|url\(\s*#[^)\s]+\s*\)|var\(\s*--db-[\w-]+\s*(,[^)]*)?\))$/i;
 
-function literalPaint(attrs: string): string[] {
-  const out: string[] = [];
-  for (const m of attrs.matchAll(/(?:^|\s)(fill|stroke)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-    const val = (m[2] ?? m[3] ?? '').trim();
-    if (val !== '' && !NEUTRAL_PAINT.test(val)) out.push(`${(m[1] ?? '').toLowerCase()}="${val}"`);
-  }
-  return out;
-}
-
+/** Parses the markup as XML and applies an element allow-list and attribute rules to every node. */
 function iconProblems(svg: string): string[] {
-  const s = svg.trim();
   const problems: string[] = [];
-  if (!/^<svg[\s>]/i.test(s) || !/<\/svg\s*>$/i.test(s)) return ['must be a single <svg> element'];
-  if ((s.match(/<svg[\s>]/gi) ?? []).length !== 1) problems.push('must contain exactly one <svg> root');
-  if (/<\s*script/i.test(s)) problems.push('contains <script>');
-  if (/<\s*foreignObject/i.test(s)) problems.push('contains <foreignObject>');
-  if (/<\s*(iframe|object|embed)/i.test(s)) problems.push('contains an embedding element');
-  if (/\son\w+\s*=/i.test(s)) problems.push('contains an on* attribute');
-  for (const m of s.matchAll(/\s(?:xlink:)?href\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-    const target = (m[1] ?? m[2] ?? '').trim();
-    if (!target.startsWith('#')) problems.push(`href "${target}" is not a #fragment`);
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(svg.trim(), 'image/svg+xml');
+  } catch (e) {
+    return [`is not well-formed svg: ${e instanceof Error ? e.message : String(e)}`];
   }
-  if (/javascript:/i.test(s)) problems.push('contains a javascript: URL');
+  const parserError = doc.getElementsByTagName('parsererror')[0];
+  if (parserError) return [`is not well-formed svg (a single <svg> root is required): ${(parserError.textContent ?? '').trim().split('\n')[0] ?? ''}`];
+  const root = doc.documentElement;
+  if (root.localName.toLowerCase() !== 'svg') return [`must be a single <svg> element (found <${root.localName}>)`];
 
-  const tags = [...s.matchAll(/<([a-zA-Z][\w:-]*)([^>]*?)(\/?)>/g)];
-  const root = tags[0];
-  if (root && literalPaint(root[2] ?? '').length > 0) {
-    problems.push(`hard-coded colour on the root (${literalPaint(root[2] ?? '').join(', ')}); use currentColor`);
-  }
-  const drawables = tags.filter((t) => DRAWABLE.has((t[1] ?? '').toLowerCase()));
-  if (drawables.length > 0 && drawables.every((t) => literalPaint(t[2] ?? '').length > 0)) {
-    problems.push('every shape has a hard-coded fill/stroke colour; use currentColor or a token variable');
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    const name = el.localName.toLowerCase();
+    const label = el.prefix ? `${el.prefix}:${el.localName}` : el.localName;
+    if (el.prefix || (el.namespaceURI !== null && el.namespaceURI !== SVG_NS) || !ALLOWED_ELEMENTS.has(name)) {
+      problems.push(`<${label}> is not allowed (allowed: ${[...ALLOWED_ELEMENTS].join(', ')})`);
+      continue;
+    }
+    for (const attr of Array.from(el.attributes)) {
+      const an = attr.name.toLowerCase();
+      const value = attr.value.trim();
+      if (an.startsWith('on')) problems.push(`<${label}> has the event attribute ${attr.name}`);
+      else if (an === 'style') problems.push(`<${label}> has a style attribute; use presentation attributes`);
+      else if (an === 'href' || an.endsWith(':href')) {
+        if (!/^#\S+$/.test(value)) problems.push(`<${label}> ${attr.name}="${value}" is not a #fragment`);
+      } else if (PAINT_ATTRIBUTES.has(an)) {
+        if (!NEUTRAL_PAINT.test(value)) {
+          problems.push(`<${label}> has hard-coded ${an}="${value}"; use none, currentColor, url(#id) or var(--db-...)`);
+        }
+      } else if (/javascript:/i.test(value) || /url\(\s*['"]?(?!#)/i.test(value)) {
+        problems.push(`<${label}> ${attr.name} refers to a script or an external url`);
+      }
+    }
   }
   return problems;
 }
@@ -334,6 +362,15 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
       if (!existsSync(path.join(themeDir, file))) fail(`manifest.css lists "${file}", which does not exist in ${themeDir}`);
       return { file, text: readCss(themeDir, file) };
     });
+  /** Manifest css plus the `<style>` blocks of the theme's own `.svelte` files (`file` is relative to the theme folder). */
+  const readAllSheets = (): Array<{ file: string; text: string }> => {
+    const sheets = readManifestCss();
+    for (const f of svelteFiles(themeDir)) {
+      const styles = [...readFileSync(f, 'utf8').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => stripComments(m[1] ?? ''));
+      if (styles.length > 0) sheets.push({ file: path.relative(themeDir, f), text: styles.join('\n') });
+    }
+    return sheets;
+  };
 
   return [
     {
@@ -458,11 +495,13 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
                 const props: BackgroundProps = { mode, intensity, env: FIXED_ENV };
                 render(Scene, { props });
                 flushSync();
+                await probe.settle();
                 if (intensity === 'static' && probe.pending().length > 0) {
                   problems.push(`${what} animates at static: pending ${probe.pending().join(', ')}`);
                 }
                 cleanup();
                 flushSync();
+                await probe.settle();
                 const left = probe.pending();
                 if (left.length > 0) problems.push(`${what} leaks after unmount: pending ${left.join(', ')}`);
               } catch (e) {
@@ -517,7 +556,7 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
       name: 'css contains no @import and no url() to another origin',
       run: () => {
         const problems: string[] = [];
-        for (const { file, text } of readManifestCss()) {
+        for (const { file, text } of readAllSheets()) {
           if (/@import\b/i.test(text)) problems.push(`${file}: @import is not allowed; list the file in manifest.css instead`);
           for (const m of text.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gis)) {
             const url = (m[2] ?? '').trim();
@@ -535,7 +574,7 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
       name: 'fonts referenced exist in the theme folder',
       run: () => {
         const problems: string[] = [];
-        for (const { file, text } of readManifestCss()) {
+        for (const { file, text } of readAllSheets()) {
           for (const face of text.matchAll(/@font-face\s*\{([^}]*)\}/gi)) {
             const body = face[1] ?? '';
             const display = /font-display\s*:\s*([\w-]+)/i.exec(body)?.[1]?.toLowerCase();
@@ -579,13 +618,8 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
     {
       name: 'honours reduced motion',
       run: () => {
-        const sheets = readManifestCss().map(({ file, text }) => ({ file, text }));
-        for (const f of svelteFiles(themeDir)) {
-          const styles = [...readFileSync(f, 'utf8').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => stripComments(m[1] ?? ''));
-          if (styles.length > 0) sheets.push({ file: path.relative(themeDir, f), text: styles.join('\n') });
-        }
         const problems: string[] = [];
-        for (const { file, text } of sheets) {
+        for (const { file, text } of readAllSheets()) {
           const moves = /(?:^|[;{\s])(?:animation|transition)(?:-[a-z-]+)?\s*:/i.test(text);
           const guarded = /@media[^{]*prefers-reduced-motion\s*:\s*reduce/i.test(text);
           if (moves && !guarded) problems.push(`${file}: has animation/transition but no @media (prefers-reduced-motion: reduce) block`);

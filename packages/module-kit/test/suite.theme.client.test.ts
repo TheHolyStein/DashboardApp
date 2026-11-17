@@ -223,13 +223,13 @@ describe('theme contract cases', () => {
     });
     test.each([
       ['<script>', icon('<script>alert(1)</script><path d="M3 3"/>'), '<script>'],
-      ['on* attribute', icon('<path d="M3 3" onclick="x()"/>'), 'on*'],
+      ['on* attribute', icon('<path d="M3 3" onclick="x()"/>'), 'event attribute'],
       ['external href', icon('<use href="https://x.test/a.svg#a"/>'), 'href'],
-      ['xlink:href', icon('<use xlink:href="//x.test/a.svg#a"/>'), 'href'],
+      ['xlink:href', icon('<use xlink:href="//x.test/a.svg#a"/>'), 'well-formed'],
       ['foreignObject', icon('<foreignObject><div/></foreignObject>'), 'foreignObject'],
-      ['hard-coded colour on the root', icon('<path d="M3 3"/>', 'viewBox="0 0 24 24" stroke="#ff0000"'), 'root'],
-      ['hard-coded colour on every path', icon('<path d="M3 3" fill="red"/><path d="M4 4" stroke="#00f"/>'), 'every shape'],
-      ['two roots', icon('<path d="M3 3"/>') + icon('<path d="M3 3"/>'), 'one <svg>'],
+      ['hard-coded colour on the root', icon('<path d="M3 3"/>', 'viewBox="0 0 24 24" stroke="#ff0000"'), 'stroke="#ff0000"'],
+      ['hard-coded colour on every path', icon('<path d="M3 3" fill="red"/><path d="M4 4" stroke="#00f"/>'), 'fill="red"'],
+      ['two roots', icon('<path d="M3 3"/>') + icon('<path d="M3 3"/>'), 'well-formed'],
       ['not svg', '<div>x</div>', 'single <svg>'],
     ])('%s fails', async (_what, svg, expected) => {
       const theme = withIcon(svg);
