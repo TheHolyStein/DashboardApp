@@ -135,9 +135,9 @@ Replace `<repository-url>` with the address of your repository. The installer in
 
 ## 6. Check the NodeSource key (once, before the first run)
 
-The installer installs Node.js 24 from NodeSource. To be safe it only trusts NodeSource's signing key if the key has a fingerprint written into the script. The script refuses to go on if the key does not match.
+The installer installs Node.js 24 from NodeSource. To be safe it only trusts NodeSource's signing key if the downloaded file holds exactly one key and that key has the fingerprint written into the script (variable `NODESOURCE_KEY_FPR` in `deploy/lib/node.sh`). The script refuses to go on otherwise. Only that one key is handed to apt.
 
-The value in the script was typed in from memory when the script was written. Check it before the first run. Show the value in the script:
+Nobody has compared the value in the script with NodeSource's published value on a real device. Do it yourself before the first run. Show the value in the script:
 
 ```
 grep NODESOURCE_KEY_FPR /opt/dashboard/deploy/lib/node.sh
@@ -148,7 +148,7 @@ Compare it, character by character, with the fingerprint that NodeSource publish
 - Same: go on.
 - Different: do not go on. Do not "fix" the script just to make the error go away. Find out which value is right first, and ask whoever maintains the repository.
 
-If this goes wrong: a mismatch stops the installer with the message "NodeSource key fingerprint mismatch". It fails closed, so nothing is trusted by mistake.
+If this goes wrong: a wrong fingerprint stops the installer with the message "NodeSource key fingerprint mismatch", and a download with more or fewer than one key stops it with "NodeSource key file holds N primary keys, expected exactly 1". It fails closed, so nothing is trusted by mistake.
 
 ## 7. Run the installer
 
@@ -156,7 +156,7 @@ If this goes wrong: a mismatch stops the installer with the message "NodeSource 
 sudo /opt/dashboard/deploy/install.sh
 ```
 
-Run it from a real terminal (an SSH session is fine). It asks you to confirm the home network address range for the firewall, and for the name and password of the first administrator.
+Run it from a real terminal (an SSH session is fine). It asks you to confirm the home network address range for the firewall, and, if the database has no enabled administrator yet, for the name and password of the first administrator (the password twice, not shown).
 
 Flags, all optional:
 
@@ -164,7 +164,7 @@ Flags, all optional:
 |---|---|
 | `--no-firewall` | Do not touch the firewall. |
 | `--allow-audit` | Go on even if the dependency audit reports serious findings. |
-| `--yes` | Do not ask for confirmations. Without a terminal the first administrator is not created; the script prints the command to do it later. |
+| `--yes` | Do not ask for confirmations (the firewall range). Without a terminal the first administrator is not created; the script prints the command to do it later. |
 | `--rebuild` | Rebuild even if this version is already installed. |
 
 The first run takes a while (installing packages, building). When it works it ends with a block like:
@@ -174,13 +174,21 @@ Dashboard is running.
   URL:        https://dashboard.tailnet-name.ts.net
 ```
 
-The installer can safely be run again. A second run on an unchanged checkout changes nothing.
+The installer can safely be run again. A second run on an unchanged checkout is designed to change nothing (this was tested only against a fake system root, not on the device).
+
+The firewall step, in detail:
+
+- Run the installer in your SSH session with `sudo`. Before it switches the firewall on, `ufw.sh` finds out where your SSH session comes from and refuses if the new rules would not allow that address (allowed: the home network range, the Tailscale range, the loopback address).
+- If it cannot tell where the session comes from, it refuses too, with a message saying so. Then either skip the firewall (`--no-firewall`) and run `sudo /opt/dashboard/deploy/ufw.sh --lan <your network>` afterwards, adding `--force` only if you are sure your address is covered. `install.sh` itself has no `--force` flag.
+- On the console (keyboard and screen) there is no SSH session and nothing to check.
+- `sudo /opt/dashboard/deploy/ufw.sh --dry-run --lan <your network>` prints the firewall rules, one per line, and changes nothing. The same holds when the installer runs in dry-run mode (`DASH_DRY_RUN=1`, a test setting you do not need): the rules are printed and the firewall is never touched.
 
 If this goes wrong:
 
 - The installer prints what failed. Fix that and run it again.
 - If it fails after the backup step, it prints the exact commands to go back. See `update-and-rollback.md`.
 - A firewall refusal does not stop the install. It is shown as a warning at the end, with the command to run later.
+- The SSH hardening is skipped (with a warning) when no administrator account has a key. Add the key as in step 3 and run the installer again.
 
 The installer also does the following, which is good to know:
 
@@ -201,7 +209,7 @@ Sign in with the administrator name and password you gave the installer. You sho
 If this goes wrong:
 
 - Page does not load: is Tailscale on, on this PC? Run `tailscale status` on the Futro and `sudo /opt/dashboard/deploy/doctor.sh`.
-- No administrator was created (you used `--yes`, or there was no terminal): the installer printed a command that starts with `sudo -u dashboard`. Run it, with your name instead of `<NAME>`. The password can be given in the `DASH_PASSWORD` variable, or typed when asked.
+- No administrator was created (you used `--yes`, or there was no terminal, or the installer could not check): the installer printed a command that starts with `sudo -u dashboard`. Run it, with your name instead of `<NAME>`; it asks for the password without showing it. The installer offers the first administrator whenever the database has no enabled administrator, so running it again also works.
 
 ## 9. Install the app on a phone
 
@@ -234,7 +242,7 @@ OK    Service active  ...
 11 OK, 0 WARN, 0 FAIL
 ```
 
-On a fresh install the "Last backup" line shows WARN ("no backups yet"). The installer only makes a database backup before an update, and doctor looks at the newest `.sqlite` file in `/var/lib/dashboard/backups`. This line also turns WARN again 26 hours after the last backup, until a regular backup job exists. "Security updates" may also show WARN. A WARN does not make doctor fail. All FAIL lines need action. `troubleshooting.md` explains every line.
+On a fresh install the "Last backup" line shows WARN ("no backups yet"). The installer only makes a database backup before an update, and doctor looks at the newest file ending in `.sqlite` in `/var/lib/dashboard/backups` (the backups of finished updates are renamed `.done.sqlite` and still count). This line also turns WARN again 26 hours after the last backup, until a regular backup job exists. "Security updates" may also show WARN. A WARN does not make doctor fail. All FAIL lines need action. `troubleshooting.md` explains every line.
 
 Exit code 0 means no FAIL. Exit code 1 means at least one FAIL. Add `--json` for machine-readable output.
 
@@ -252,3 +260,4 @@ These need the real device and were not checked when this was written:
 - The security score of the service (`systemd-analyze security dashboard.service`; target 2.5 or lower).
 - How Caddy gets its certificate from Tailscale on the Debian version you have.
 - The NodeSource fingerprint (step 6).
+- The SSH lock-out check of the firewall step over a real `sudo` SSH session, and the backup and rollback commands of `update-and-rollback.md`: the install scripts were checked piece by piece on another machine, not run on the Futro.
