@@ -8,3 +8,5 @@ playwright-report
 .claude/
 apps/server/src/generated
 apps/web/src/generated
+test-results
+e2e/.auth

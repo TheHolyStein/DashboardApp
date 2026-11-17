@@ -8,7 +8,7 @@
   "packageManager": "pnpm@12.18.0",
   "scripts": {
     "predev": "pnpm gen",
-    "dev": "pnpm -r --if-present --parallel dev",
+    "dev": "node tools/dev.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "eslint . --ignore-pattern tools/lint-fixtures",
     "pretypecheck": "pnpm gen",
@@ -17,13 +17,15 @@
     "test": "vitest run",
     "prebuild": "pnpm gen",
     "build": "pnpm -r --if-present build",
-    "e2e": "echo 'e2e: not yet implemented'",
+    "e2e": "playwright test",
     "gen": "node tools/gen-registry.ts",
     "new:module": "node tools/new-module.ts",
-    "new:theme": "node tools/new-theme.ts"
+    "new:theme": "node tools/new-theme.ts",
+    "dev:admin": "node --experimental-transform-types --import ./apps/server/src/auth/register-ts.ts ./apps/server/src/auth/cli.ts user:create --role admin"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
     "eslint-import-resolver-typescript": "^4.4.5",
