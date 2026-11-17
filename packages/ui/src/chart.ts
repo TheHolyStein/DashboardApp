@@ -297,7 +297,6 @@ export interface PlotModule {
 export type LoadPlot = () => Promise<PlotModule>;
 
 export const defaultLoadPlot: LoadPlot = async () => {
-  // @ts-expect-error -- CSS side-effect import; the bundler emits it into the same lazy chunk as uPlot
   const [mod] = await Promise.all([import('uplot'), import('uplot/dist/uPlot.min.css')]);
   return mod.default as unknown as PlotModule;
 };
