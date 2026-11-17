@@ -78,13 +78,19 @@ After a rollback, data entered since the backup is gone. The moved-aside `dashbo
 
 Use this when the installer said `Dashboard is running.` but the new version is wrong, and the terminal output with the commands is gone. Run everything on the Futro over SSH.
 
-1. Find the backup the update made:
+1. Print the revision that is running now, and write it down:
 
 ```
-ls -l /var/lib/dashboard/backups
+sudo git -C /opt/dashboard rev-parse HEAD
 ```
 
-   Take the newest pair named `pre-<version>-<revision start>-<timestamp>.done.sqlite` and `...done.rev`. The `.done.rev` file holds the previous revision. The time stamps in the names tell you which pair is from the update you want to undo.
+   Then list the finished backups, newest first, with the revision each `.done.rev` file holds:
+
+```
+for f in $(ls -t /var/lib/dashboard/backups/*.done.rev); do echo "$f: $(cat "$f")"; done
+```
+
+   Take the newest pair named `pre-<version>-<revision start>-<timestamp>.done.sqlite` and `...done.rev` whose revision is different from the one printed first. Skip every pair whose revision is the current one: a rebuild of the version that is running now (`install.sh --rebuild`) also makes a backup and marks it `.done`, and its database is already the post-update state. The time stamps in the names tell you which pair is from the update you want to undo.
 
 2. Read the previous revision from the `.rev` file (use the file name you have):
 
@@ -169,4 +175,4 @@ If this goes wrong: before you run the printed rollback commands, check that the
 ls -l /var/lib/dashboard/backups
 ```
 
-The printed block checks this itself and refuses to touch the database when the backup is missing. Do not assume the database is still the old one in that case: the failed update may already have changed it, because the new version migrates the database when it starts. If the backup file is really missing, do not delete anything; ask for help, and keep the `dashboard.sqlite` files in `/var/lib/dashboard` as they are. Going back with the code only (steps 3 to 5 of "Roll back an update that went through but misbehaves", without step 4) can leave an old version facing a newer database, so it is not a safe fix on its own.
+The printed block checks this itself and refuses to touch the database when the backup is missing. Do not assume the database is still the old one in that case: the failed update may already have changed it, because the new version migrates the database when it starts. If the backup file is really missing, do not delete anything; ask for help, and keep the `dashboard.sqlite` files in `/var/lib/dashboard` as they are. Going back with the code only (steps 3, 5 and 6 of "Roll back an update that went through but misbehaves": stop the service, check out the previous revision, build and start it; step 4, the database restore, is left out) can leave an old version facing a newer database, so it is not a safe fix on its own.

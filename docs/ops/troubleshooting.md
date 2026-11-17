@@ -68,15 +68,20 @@ sudo systemctl stop dashboard.service
 sudo ls -lh /var/lib/dashboard/backups
 ```
 
-3. Move the database and its two side files aside (nothing is deleted). Use your own backup file name instead of the example in the first line; the line stops if the backup is missing:
+3. Move the database aside (nothing is deleted). Use your own backup file name instead of the example in the line; the command stops if the backup is missing:
 
 ```
 sudo test -s /var/lib/dashboard/backups/pre-0.0.0-0123456789ab-20261114T120000Z.done.sqlite && sudo mv /var/lib/dashboard/dashboard.sqlite /var/lib/dashboard/dashboard.sqlite.broken-$(date -u +%Y%m%dT%H%M%SZ) || echo "backup missing or database not moved: do NOT continue"
-sudo mv /var/lib/dashboard/dashboard.sqlite-wal /var/lib/dashboard/dashboard.sqlite-wal.broken-$(date -u +%Y%m%dT%H%M%SZ)
-sudo mv /var/lib/dashboard/dashboard.sqlite-shm /var/lib/dashboard/dashboard.sqlite-shm.broken-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
-   The last two lines may say "No such file"; that is fine. If the first line printed "do NOT continue", stop here and start the service again with `sudo systemctl start dashboard.service`.
+   Continue only if that command printed nothing (no "do NOT continue" message). If it printed that message, stop here and start the service again with `sudo systemctl start dashboard.service`.
+
+   Then move the two side files aside. A side file that does not exist is not an error; the message is hidden:
+
+```
+sudo mv /var/lib/dashboard/dashboard.sqlite-wal /var/lib/dashboard/dashboard.sqlite-wal.broken-$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null
+sudo mv /var/lib/dashboard/dashboard.sqlite-shm /var/lib/dashboard/dashboard.sqlite-shm.broken-$(date -u +%Y%m%dT%H%M%SZ) 2>/dev/null
+```
 
 4. Put the backup in place, owned by the service user (this is the owner and mode the installer uses):
 
