@@ -175,5 +175,5 @@
 
 <style>
   .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
-  .error { color: var(--db-danger, #b42318); }
+  .error { color: var(--db-fg); border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
 </style>

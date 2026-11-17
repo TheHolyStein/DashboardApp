@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { DashError } from '@dash/contract';
   import { Button } from '@dash/ui';
   import { z } from 'zod';
   import { AdminUser, isCode, isForbidden, type AdminUserT } from '../../lib/admin-api.js';
@@ -24,9 +25,14 @@
   }
   onMount(() => void load());
 
+  // The server's last-admin 409 carries no `details`; its message is the only marker.
+  const LAST_ADMIN = /last enabled admin/i;
   function explain(e: unknown): string {
-    if (isCode(e, 'conflict'))
-      return t('users.lastAdmin', 'This is the last administrator. Make someone else an administrator first.');
+    if (isCode(e, 'conflict')) {
+      if (e instanceof DashError && LAST_ADMIN.test(e.message))
+        return t('users.lastAdmin', 'This is the last administrator. Make someone else an administrator first.');
+      return t('settings.users.conflict', e instanceof DashError ? e.message : 'That conflicts with an existing user.');
+    }
     if (isForbidden(e)) return t('admin.denied', 'You are not allowed to do this.');
     if (isCode(e, 'invalid')) return t('users.invalid', 'Some values are not valid (names must be unique, passwords 12 to 256 characters).');
     return t('users.failed', 'That did not work. Try again.');

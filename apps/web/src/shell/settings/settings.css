@@ -3,8 +3,8 @@
 .st h3 { margin: 0.5rem 0 0; font-size: 1.05rem; }
 .st p { margin: 0; }
 .st .muted { color: var(--db-muted, #4a5260); font-size: 0.9em; }
-.st .ok { color: var(--db-ok, #1b6e3c); }
-.st .err { color: var(--db-danger, #b42318); }
+.st .ok { color: var(--db-fg); border-left: 3px solid var(--db-ok); padding-left: 0.5em; }
+.st .err { color: var(--db-fg); border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
 .st form, .st .stack { display: grid; gap: 0.6rem; max-width: 28rem; }
 .st label { display: grid; gap: 0.2rem; font-weight: 600; }
 .st input, .st select {

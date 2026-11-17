@@ -119,5 +119,5 @@
   .card { display: flex; gap: 0.75rem; align-items: center; }
   .text { display: grid; gap: 0.15rem; }
   .desc, .note { font-size: 0.85em; color: var(--db-muted, #4a5260); }
-  .error { color: var(--db-danger, #b42318); }
+  .error { color: var(--db-fg); border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
 </style>

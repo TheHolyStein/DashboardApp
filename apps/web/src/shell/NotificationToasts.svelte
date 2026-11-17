@@ -20,7 +20,7 @@
   </div>
   <div role="status" class="region">
     {#each others as toast (toast.key)}
-      <div class="toast">
+      <div class="toast {toast.notification.level === 'warn' ? 'warn' : 'info'}">
         <span><strong>{toast.notification.title}</strong>{#if toast.notification.body} {toast.notification.body}{/if}</span>
         <button type="button" aria-label={t('notifications.dismiss', 'Dismiss')} onclick={() => store.dismissToast(toast.key)}>✕</button>
       </div>
@@ -36,6 +36,9 @@
     color: var(--db-fg, #15181d); background: var(--db-surface, #fff); border: var(--db-border, 1px solid #c9ced6);
     border-radius: var(--db-radius, 8px); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2); overflow-wrap: anywhere;
   }
-  .crit { border-color: var(--db-crit, #b3261e); }
+  .toast { color: var(--db-fg); background: var(--db-surface); }
+  .crit { border-left: 3px solid var(--db-crit); }
+  .warn { border-left: 3px solid var(--db-warn); }
+  .info { border-left: 3px solid var(--db-accent); }
   button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; padding: 0 0.25rem; }
 </style>

@@ -130,7 +130,7 @@
     background: linear-gradient(90deg, var(--db-surface-2, #eef0f4), var(--db-surface, #fff), var(--db-surface-2, #eef0f4));
     background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
   }
-  .unavailable { margin: 0; color: var(--db-fg-muted, #4a5260); }
+  .unavailable { margin: 0; color: var(--db-muted); }
   .failed { display: grid; gap: 0.5rem; justify-items: start; color: var(--db-fg, #15181d); }
   .failed p { margin: 0; }
   @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

@@ -215,7 +215,7 @@
   .placeholder { position: absolute; inset: 0; }
   .tip {
     position: absolute; z-index: 2; pointer-events: none; font-size: 0.75rem; line-height: 1.3; padding: 0.3rem 0.45rem;
-    border-radius: 0.35rem; white-space: nowrap; background: var(--db-surface, #fff); color: var(--db-text, #1a1f27);
+    border-radius: 0.35rem; white-space: nowrap; background: var(--db-surface, #fff); color: var(--db-fg);
     border: 1px solid var(--db-border, #d9dde3); box-shadow: 0 2px 6px rgb(0 0 0 / 0.15);
   }
   .tip :global(.tip-time) { color: var(--db-muted, #4a5260); margin-bottom: 0.15rem; }

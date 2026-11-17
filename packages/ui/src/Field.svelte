@@ -35,5 +35,5 @@
   label { display: grid; gap: 0.25rem; }
   .label { font-weight: 600; color: var(--db-fg, #15181d); }
   .help { margin: 0; font-size: 0.85em; color: var(--db-muted, #4a5260); }
-  .error { margin: 0; font-size: 0.85em; color: var(--db-danger, #b42318); }
+  .error { margin: 0; font-size: 0.85em; color: var(--db-fg); border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
 </style>

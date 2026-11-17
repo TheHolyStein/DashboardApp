@@ -62,7 +62,7 @@
     max-width: min(24rem, calc(100vw - 2rem)); padding: 1rem; margin: auto; color: var(--db-fg, #15181d);
     background: var(--db-surface, #fff); border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px);
   }
-  .confirm::backdrop { background: var(--db-backdrop, rgba(0, 0, 0, 0.5)); }
+  .confirm::backdrop { background: rgba(0, 0, 0, 0.5); }
   h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
   p { margin: 0 0 1rem; }
   .row { display: flex; gap: 0.5rem; justify-content: flex-end; }

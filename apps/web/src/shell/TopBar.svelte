@@ -119,7 +119,7 @@
     border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px);
   }
   .name { margin-left: 0.4rem; }
-  .err { color: var(--db-crit, #b3261e); font-size: 0.85em; }
+  .err { color: var(--db-fg); font-size: 0.85em; border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
   .user { position: relative; }
   .menu {
     position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 11rem; margin: 0; padding: 0.25rem; list-style: none;

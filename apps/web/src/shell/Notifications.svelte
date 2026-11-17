@@ -138,7 +138,8 @@
   .bell { position: relative; padding: 0.4rem 0.6rem; border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); }
   .badge {
     position: absolute; top: -6px; right: -6px; min-width: 1.2rem; padding: 0 0.3rem; font-size: 0.75rem; line-height: 1.2rem;
-    text-align: center; color: var(--db-on-accent, #fff); background: var(--db-crit, #b3261e); border-radius: 999px;
+    text-align: center; color: var(--db-fg); background: var(--db-surface); border-radius: 999px;
+    box-shadow: 0 0 0 2px var(--db-crit);
   }
   .panel {
     position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(24rem, calc(100vw - 2rem)); max-height: 70vh; overflow: auto;

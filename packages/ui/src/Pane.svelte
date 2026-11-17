@@ -72,10 +72,10 @@
     box-sizing: border-box; width: min(960px, calc(100vw - 2rem)); max-width: 960px; max-height: 90vh; padding: 0; margin: auto;
     color: var(--db-fg, #15181d); background: var(--db-surface, #fff); border: var(--db-border, 1px solid #c9ced6);
     border-radius: var(--db-radius, 8px); overflow: hidden;
-    animation: pane-in var(--db-pane-ms, 150ms) ease-out;
+    animation: pane-in 150ms ease-out;
   }
   .pane.full { width: 100vw; max-width: none; height: 100dvh; max-height: none; border-radius: 0; border: 0; }
-  .pane::backdrop { background: var(--db-backdrop, rgba(0, 0, 0, 0.5)); }
+  .pane::backdrop { background: rgba(0, 0, 0, 0.5); }
   .inner { display: flex; flex-direction: column; max-height: inherit; height: 100%; }
   .bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; border-bottom: var(--db-border, 1px solid #c9ced6); }
   .title { flex: 1; margin: 0; font-size: 1.1rem; }

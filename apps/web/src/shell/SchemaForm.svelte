@@ -157,7 +157,7 @@
   .item { display: grid; gap: 0.25rem; margin-bottom: var(--db-gap, 8px); padding-bottom: var(--db-gap, 8px); border-bottom: var(--db-border, 1px solid #c9ced6); }
   .row { display: flex; gap: 0.25rem; }
   .help { margin: 0 0 0.25rem; font-size: 0.85em; color: var(--db-muted, #4a5260); }
-  .error { margin: 0.25rem 0 0; font-size: 0.85em; color: var(--db-danger, #b42318); }
+  .error { margin: 0.25rem 0 0; font-size: 0.85em; color: var(--db-fg); border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
   input, select, textarea {
     font: inherit; padding: 0.4rem 0.5rem; color: var(--db-fg, #15181d); background: var(--db-surface, #fff);
     border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px);

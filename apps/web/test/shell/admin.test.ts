@@ -97,12 +97,14 @@ describe('admin sections', () => {
     signIn();
     settingsArea.show('account');
     expect(location.search).toBe('?s=account');
+    render(SettingsArea);
+    await screen.findByRole('navigation', { name: 'Settings sections' });
+    // close() goes Back, because this session pushed the entry.
     settingsArea.close();
-    await waitFor(() => expect(true).toBe(true));
-    history.back();
     await waitFor(() => expect(location.search).toBe(''));
     settingsArea.sync();
     expect(settingsArea.open).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Settings sections' })).toBeNull());
   });
 });
 
@@ -162,7 +164,11 @@ describe('users', () => {
   it('lists users, marks the own row and shows the last-admin message on 409', async () => {
     signIn({ id: 'u1', role: 'admin' });
     adminHandlers();
-    server.use(http.patch('/api/admin/users/:id', () => errorResponse('conflict', 409)));
+    server.use(
+      http.patch('/api/admin/users/:id', () =>
+        errorResponse('conflict', 409, 'The last enabled admin cannot be removed, demoted or disabled'),
+      ),
+    );
     const user = userEvent.setup();
     render(Users);
     const own = (await screen.findByText('Alice')).closest('li') as HTMLElement;
@@ -170,6 +176,21 @@ describe('users', () => {
     expect(within(screen.getByText('Bob').closest('li') as HTMLElement).queryByText('(you)')).toBeNull();
     await user.click(within(own).getByRole('button', { name: 'Make member' }));
     expect((await screen.findByRole('alert')).textContent).toContain('last administrator');
+  });
+
+  it('other 409s show the server message, not the last-administrator text', async () => {
+    signIn({ id: 'u1', role: 'admin' });
+    adminHandlers();
+    server.use(http.post('/api/admin/users', () => errorResponse('conflict', 409, 'A user with this name already exists')));
+    const user = userEvent.setup();
+    render(Users);
+    await screen.findByText('Alice');
+    await user.type(screen.getByLabelText('Name'), 'Bob');
+    await user.type(screen.getByLabelText('Password'), 'long-enough-password');
+    await user.click(screen.getByRole('button', { name: 'Create user' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('A user with this name already exists');
+    expect(alert.textContent).not.toContain('last administrator');
   });
 
   it('creates a user and deletes one after confirming', async () => {

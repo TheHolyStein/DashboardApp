@@ -18,8 +18,9 @@
     border: var(--db-border, 1px solid #c9ced6); color: var(--db-fg, #15181d); background: transparent;
     transition: background-color 120ms ease;
   }
-  .primary { background: var(--db-accent, #1d4ed8); border-color: var(--db-accent, #1d4ed8); color: var(--db-on-accent, #fff); }
-  .danger { background: var(--db-danger, #b42318); border-color: var(--db-danger, #b42318); color: var(--db-on-accent, #fff); }
+  /* No accent or danger fill: the label colour is only guaranteed on the surface, so the variant shows in the border. */
+  .primary { background: var(--db-surface); border: 2px solid var(--db-accent); color: var(--db-fg); }
+  .danger { background: var(--db-surface); border: 2px solid var(--db-crit); color: var(--db-fg); }
   .ghost:hover:not(:disabled) { background: var(--db-surface-2, #eef0f4); }
   .btn:disabled { opacity: 0.55; cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--db-focus, #1d4ed8); outline-offset: 2px; }
