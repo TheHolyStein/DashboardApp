@@ -35,8 +35,8 @@ setup() { make_env; }
   after="$(snapshot)"
   [ "$before" = "$after" ]
   # no rebuild and no service restart on an unchanged checkout
-  ! grep -q '^pnpm build' "$CALLS"
-  ! grep -q '^systemctl restart' "$CALLS"
+  if grep -q '^pnpm build' "$CALLS"; then false; fi
+  if grep -q '^systemctl restart' "$CALLS"; then false; fi
 }
 
 @test "existing secret.key is not overwritten" {

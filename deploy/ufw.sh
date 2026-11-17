@@ -118,7 +118,8 @@ detect_ssh_session() {
   for pid in $(ancestor_sshd_pids); do
     SSH_STATE=unknown
     if command -v ss >/dev/null 2>&1; then
-      peer="$(ss -Htnp state established 2>/dev/null | awk -v pat="pid=$pid," 'index($0, pat) {print $4; exit}')"
+      # A failing ss, or a SIGPIPE once awk has its answer, must not abort the script.
+      peer="$(ss -Htnp state established 2>/dev/null | awk -v pat="pid=$pid," 'index($0, pat) {print $4; exit}')" || true
       if [ -n "$peer" ]; then
         SSH_STATE=known
         SSH_SRC="$(normalise_peer "$peer")"
@@ -126,9 +127,7 @@ detect_ssh_session() {
       fi
     fi
   done
-  if [ "$SSH_STATE" = unknown ]; then
-    return 0
-  fi
+  # ss gave nothing (or is missing): fall back to the login record of this terminal.
   who_host="$(who -m 2>/dev/null | sed -n 's/.*(\(.*\))[[:space:]]*$/\1/p' | head -n 1)" || true
   case "$who_host" in
     '' | :*) ;; # no remote host, or a local X display

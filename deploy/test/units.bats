@@ -41,7 +41,7 @@ teardown_file() {
 
 @test "dashboard.service does not set the forbidden directives" {
   f="$UNITS_DIR/dashboard.service"
-  ! grep -E '^(MemoryDenyWriteExecute|IPAddressDeny|IPAddressAllow|StateDirectory)=' "$f"
+  if grep -E '^(MemoryDenyWriteExecute|IPAddressDeny|IPAddressAllow|StateDirectory)=' "$f"; then false; fi
 }
 
 @test "netscan socket and service are restricted and inert until the helper exists" {

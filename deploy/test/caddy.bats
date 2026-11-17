@@ -24,7 +24,7 @@ render() {
 @test "rendered Caddyfile has no leftover placeholders and the required directives" {
   render "$BATS_TEST_TMPDIR/Caddyfile"
   f="$BATS_TEST_TMPDIR/Caddyfile"
-  ! grep -F '${' "$f"
+  if grep -F '${' "$f"; then false; fi
   grep -q '^futro.tail1234.ts.net {$' "$f"
   grep -q 'bind 100.64.1.2' "$f"
   grep -q 'reverse_proxy 127.0.0.1:8787' "$f"
@@ -72,9 +72,9 @@ ufw --force enable'
   # shellcheck source=/dev/null
   . "$DEPLOY/lib/net.sh"
   ip_in_cidr 192.168.1.50 192.168.1.0/24
-  ! ip_in_cidr 192.168.2.50 192.168.1.0/24
+  if ip_in_cidr 192.168.2.50 192.168.1.0/24; then false; fi
   ip_in_cidr 100.100.5.5 100.64.0.0/10
-  ! ip_in_cidr 100.128.0.1 100.64.0.0/10
+  if ip_in_cidr 100.128.0.1 100.64.0.0/10; then false; fi
   [ "$(cidr_network 10.1.2.3/16)" = "10.1.0.0/16" ]
 }
 

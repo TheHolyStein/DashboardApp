@@ -7,7 +7,8 @@ ensure_secret() {
   if [ -e "$key" ]; then
     size="$(stat -c %s "$key")"
     [ "$size" -eq 32 ] || die "$key exists but is $size bytes, not 32. Not touching it; fix or remove it by hand."
-    fix_owner_mode "$key" 0640 root "$APP_USER"
+    # root:dashboard 0640, or the tighter dashboard:dashboard 0600, are both fine
+    fix_owner_mode "$key" 0640 root "$APP_USER" 0600 "$APP_USER" "$APP_USER"
     log "secret key present (kept)"
     return 0
   fi

@@ -51,6 +51,7 @@ FIREWALL_FAILED=0
 ADMIN_SKIPPED=0
 ROLLBACK_ARMED=0
 BACKUP_FILE=""
+BACKUP_OTHERS=""
 PRE_REV=""
 
 on_exit() {
@@ -113,6 +114,10 @@ if [ "$CADDY_CHANGED" = 1 ] || ! systemctl is-active --quiet caddy.service 2>/de
 fi
 wait_for_health
 record_deployed
+if [ "$ROLLBACK_ARMED" = 1 ]; then
+  mark_backups_done
+  ROLLBACK_ARMED=0
+fi
 
 # 12. first admin (offered when the users table has no enabled admin)
 create_first_admin
