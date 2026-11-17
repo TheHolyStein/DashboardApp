@@ -67,7 +67,7 @@ Run them as root, one line at a time, from the top. The simplest way: open a roo
 Before step 2, look at the backups yourself:
 
 ```
-ls -l /var/lib/dashboard/backups
+sudo ls -l /var/lib/dashboard/backups
 ```
 
 The file named in the printed block must be in the list and must not have size 0. If several backups of the same version exist, the printed block names the one taken before this update and mentions the others as comments; use the named one.
@@ -95,7 +95,7 @@ sudo sh -c 'for f in $(ls -t /var/lib/dashboard/backups/*.done.rev); do echo "$f
 2. Read the previous revision from the `.rev` file (use the file name you have):
 
 ```
-cat /var/lib/dashboard/backups/pre-0.0.0-0123456789ab-20261114T120000Z.done.rev
+sudo cat /var/lib/dashboard/backups/pre-0.0.0-0123456789ab-20261114T120000Z.done.rev
 ```
 
    It prints a long hexadecimal revision. Write it down.
@@ -172,7 +172,7 @@ sudo /opt/dashboard/deploy/doctor.sh
 If this goes wrong: before you run the printed rollback commands, check that the backup file they name is there and not empty:
 
 ```
-ls -l /var/lib/dashboard/backups
+sudo ls -l /var/lib/dashboard/backups
 ```
 
 The printed block checks this itself and refuses to touch the database when the backup is missing. Do not assume the database is still the old one in that case: the failed update may already have changed it, because the new version migrates the database when it starts. If the backup file is really missing, do not delete anything; ask for help, and keep the `dashboard.sqlite` files in `/var/lib/dashboard` as they are. Going back with the code only (steps 3, 5 and 6 of "Roll back an update that went through but misbehaves": stop the service, check out the previous revision, build and start it; step 4, the database restore, is left out) can leave an old version facing a newer database, so it is not a safe fix on its own.
