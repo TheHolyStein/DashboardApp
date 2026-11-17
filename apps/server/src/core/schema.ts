@@ -115,6 +115,9 @@ export const notifications = sqliteTable(
     level: text('level').notNull(),
     title: text('title').notNull(),
     body: text('body'),
+    titleKey: text('title_key'), // migration 0006: translation keys + JSON vars; title/body stay the English fallback
+    bodyKey: text('body_key'),
+    vars: text('vars'),
     url: text('url'),
     dedupeKey: text('dedupe_key'),
     createdAt: text('created_at').notNull(),

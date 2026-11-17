@@ -61,6 +61,20 @@ describe('totp', () => {
     expect(u.pathname).toContain('Alice');
   });
 
+  it('GET /api/me reports totpEnabled: false when none or pending, true when enabled or unreadable', async () => {
+    const meOf = async (e: AuthEnv, cookie: string) =>
+      (await e.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } })).json<{ totpEnabled: boolean }>().totpEnabled;
+    const pending = await withSetup();
+    expect(await meOf(pending.e, pending.s.cookie)).toBe(false);
+    await env?.app.close();
+    const ctx = await enabled();
+    expect(await meOf(ctx.e, ctx.s.cookie)).toBe(true);
+    ctx.e.db.prepare('UPDATE users SET totp_secret_enc = ? WHERE id = ?').run('garbage', ctx.alice.id);
+    expect(await meOf(ctx.e, ctx.s.cookie)).toBe(true);
+    expect((await post(ctx.e, ctx.s, '/api/me/totp/disable', { password: PASSWORD })).statusCode).toBe(204);
+    expect(await meOf(ctx.e, ctx.s.cookie)).toBe(false);
+  });
+
   it('totp_secret_enc in the database is not the base32 secret', async () => {
     const { e, alice, secret } = await enabled();
     const stored = (e.db.prepare('SELECT totp_secret_enc AS v FROM users WHERE id = ?').get(alice.id) as { v: string }).v;

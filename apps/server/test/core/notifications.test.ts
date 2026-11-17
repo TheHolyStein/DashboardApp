@@ -54,6 +54,37 @@ describe('notifications', () => {
     expect(ev.notification).toMatchObject({ id: row.id, moduleId: 'demo', title: 'Boom', readAt: null });
   });
 
+  it('stores titleKey, bodyKey and vars, streams them, and returns them from the privileged list', async () => {
+    env = await makeEnv();
+    env.notifications.notify('demo', {
+      level: 'info', title: 'Timer finished', body: 'Tea', titleKey: 'm.clock.notify.finished', bodyKey: 'm.clock.notify.body',
+      vars: { label: 'Tea', n: 3 }, userIds: ['alice'],
+    });
+    expect(rows(env)[0]).toMatchObject({
+      title: 'Timer finished', title_key: 'm.clock.notify.finished', body_key: 'm.clock.notify.body', vars: '{"label":"Tea","n":3}',
+    });
+    expect(notified(env, 'alice')[0].ev.notification).toMatchObject({
+      titleKey: 'm.clock.notify.finished', bodyKey: 'm.clock.notify.body', vars: { label: 'Tea', n: 3 },
+    });
+    const list = await env.notifications.api.list('alice', { limit: 10 });
+    expect(list[0]).toMatchObject({ titleKey: 'm.clock.notify.finished', vars: { label: 'Tea', n: 3 } });
+  });
+
+  it('without keys the fields are null; invalid keys and vars are dropped; a dedupe update replaces the keys', async () => {
+    env = await makeEnv();
+    env.notifications.notify('demo', { level: 'info', title: 'Plain', userIds: ['alice'] });
+    expect(notified(env, 'alice')[0].ev.notification).toMatchObject({ titleKey: null, bodyKey: null, vars: null });
+    env.notifications.notify('demo', {
+      level: 'info', title: 'Bad', titleKey: 'not a key!', bodyKey: 'x'.repeat(101), vars: { a: { nested: 1 }, b: Number.NaN } as never, userIds: ['bob'],
+    });
+    expect(notified(env, 'bob')[0].ev.notification).toMatchObject({ titleKey: null, bodyKey: null, vars: null });
+    env.notifications.notify('demo', { level: 'info', title: 'D1', titleKey: 'k.one', dedupeKey: 'd', userIds: ['alice'] });
+    env.notifications.notify('demo', { level: 'info', title: 'D2', dedupeKey: 'd', userIds: ['alice'] });
+    const d = rows(env).filter((r) => r.dedupe_key === 'd');
+    expect(d).toHaveLength(1);
+    expect(d[0]).toMatchObject({ title: 'D2', title_key: null });
+  });
+
   it('host.notifications is undefined for a non-privileged module', async () => {
     env = await makeEnv();
     expect(env.modules.find((m) => m.id === 'demo')!.host.notifications).toBeUndefined();
@@ -139,7 +170,7 @@ describe('notifications', () => {
     const all = await env.call('GET', '/api/notifications', 'alice');
     expect(all.json.map((n: any) => n.title)).toEqual(['n2', 'n1', 'n0']);
     expect(all.json[0]).toEqual({
-      id: expect.any(String), moduleId: 'demo', level: 'info', title: 'n2', body: null, url: null,
+      id: expect.any(String), moduleId: 'demo', level: 'info', title: 'n2', titleKey: null, bodyKey: null, vars: null, body: null, url: null,
       createdAt: '2026-11-12T12:00:00.000Z', readAt: null,
     });
     expect((await env.call('GET', '/api/notifications?limit=1', 'alice')).json).toHaveLength(1);

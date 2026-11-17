@@ -20,6 +20,9 @@ export const PRIVILEGED: Record<string, string[]> = { notifications: ['notificat
 
 export const TITLE_MAX = 200;
 export const BODY_MAX = 2000;
+export const KEY_MAX = 100;
+export const VARS_MAX = 10;
+export const VAR_VALUE_MAX = 200;
 export const DEDUPE_WINDOW_MS = 24 * 3600 * 1000;
 export const RETENTION_MS = 30 * 24 * 3600 * 1000;
 
@@ -43,8 +46,34 @@ export interface NotificationsDeps {
 }
 
 interface Row {
-  id: string; module_id: string; level: string; title: string; body: string | null; url: string | null;
+  id: string; module_id: string; level: string; title: string; body: string | null;
+  title_key: string | null; body_key: string | null; vars: string | null; url: string | null;
   created_at: string; read_at: string | null;
+}
+
+/** Translation key: a short dotted/dashed token, or null. */
+function cleanKey(k: unknown): string | null {
+  return typeof k === 'string' && k.length > 0 && k.length <= KEY_MAX && /^[\w.-]+$/.test(k) ? k : null;
+}
+
+/** Template variables: at most VARS_MAX entries of finite numbers or (capped) strings, else null. */
+function cleanVars(v: unknown): Record<string, string | number> | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const out: Record<string, string | number> = {};
+  for (const [k, val] of Object.entries(v).slice(0, VARS_MAX)) {
+    if (typeof val === 'string') out[k] = val.slice(0, VAR_VALUE_MAX);
+    else if (typeof val === 'number' && Number.isFinite(val)) out[k] = val;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function parseVars(json: string | null): Record<string, string | number> | null {
+  if (json === null) return null;
+  try {
+    return cleanVars(JSON.parse(json));
+  } catch {
+    return null;
+  }
 }
 
 const toRecord = (r: Row): NotificationRecord => ({
@@ -53,6 +82,9 @@ const toRecord = (r: Row): NotificationRecord => ({
   level: r.level as NotificationRecord['level'],
   title: r.title,
   body: r.body,
+  titleKey: r.title_key,
+  bodyKey: r.body_key,
+  vars: parseVars(r.vars),
   url: r.url,
   createdAt: r.created_at,
   readAt: r.read_at,
@@ -81,11 +113,11 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
      ORDER BY created_at DESC LIMIT 1`,
   );
   const update = db.prepare(
-    'UPDATE notifications SET level=?, title=?, body=?, url=?, created_at=?, read_at=? WHERE id=?',
+    'UPDATE notifications SET level=?, title=?, body=?, title_key=?, body_key=?, vars=?, url=?, created_at=?, read_at=? WHERE id=?',
   );
   const insert = db.prepare(
-    `INSERT INTO notifications (id, module_id, user_id, level, title, body, url, dedupe_key, created_at, read_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO notifications (id, module_id, user_id, level, title, body, title_key, body_key, vars, url, dedupe_key, created_at, read_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   );
 
   function targets(moduleId: ModuleId, n: Notification): UserId[] {
@@ -98,6 +130,10 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
     const level = n.level === 'warn' || n.level === 'critical' ? n.level : 'info';
     const title = String(n.title).slice(0, TITLE_MAX);
     const body = n.body === undefined ? null : String(n.body).slice(0, BODY_MAX);
+    const titleKey = cleanKey(n.titleKey);
+    const bodyKey = cleanKey(n.bodyKey);
+    const vars = cleanVars(n.vars);
+    const varsJson = vars === null ? null : JSON.stringify(vars);
     const url = safeUrl(n.url);
     const stored: Array<{ userId: UserId; id: string; createdAt: string }> = [];
 
@@ -111,8 +147,8 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
             ? undefined
             : (findDedupe.get(moduleId, n.dedupeKey, userId, iso(-DEDUPE_WINDOW_MS)) as { id: string } | undefined);
         const id = existing?.id ?? uuidv7(deps.now());
-        if (existing) update.run(level, title, body, url, createdAt, readAt, id);
-        else insert.run(id, moduleId, userId, level, title, body, url, n.dedupeKey ?? null, createdAt, readAt);
+        if (existing) update.run(level, title, body, titleKey, bodyKey, varsJson, url, createdAt, readAt, id);
+        else insert.run(id, moduleId, userId, level, title, body, titleKey, bodyKey, varsJson, url, n.dedupeKey ?? null, createdAt, readAt);
         if (!muted) {
           stored.push({ userId, id, createdAt });
         }
@@ -131,7 +167,7 @@ export function createNotifications(deps: NotificationsDeps): NotificationsServi
     for (const { userId, id, createdAt } of stored) {
       let dto: NotificationData;
       try {
-        dto = NotificationDto.parse({ id, moduleId, level, title, body, url, createdAt, readAt: null });
+        dto = NotificationDto.parse({ id, moduleId, level, title, body, titleKey, bodyKey, vars, url, createdAt, readAt: null });
       } catch (err) {
         sinkFailed(err);
         continue;

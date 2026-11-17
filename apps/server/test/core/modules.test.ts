@@ -25,7 +25,8 @@ const demo = (id = 'demo') =>
     r.get('/hello', { level: 'view' }, async (req) => ({ hi: req.user.name, level: req.level }));
     r.post('/echo', { level: 'view', body: z.object({ n: z.number() }) }, async (req) => req.body);
     r.post('/edit', { level: 'edit' }, async (req) => ({ by: req.user.id, level: req.level }));
-    r.get('/nothing', { level: 'view' }, async () => undefined);
+    r.get('/nothing', { level: 'view' }, () => undefined); // sync handlers are allowed
+    r.post('/double', { level: 'view', body: z.object({ n: z.number() }) }, (req) => ({ n: req.body.n * 2 })); // typed body, sync return
     r.get('/q', { level: 'view', query: z.object({ a: z.coerce.number() }) }, async (req) => req.query);
     r.get('/item/:id', { level: 'view' }, async (req) => ({ id: req.params['id'] }));
     r.get('/bin', { level: 'view' }, async () => new BinaryResponse(new Uint8Array([1, 2, 3]), 'image/png', 'max-age=60'));
@@ -168,6 +169,8 @@ describe('module router', () => {
     });
     expect((await e.app.inject({ url: '/api/m/demo/item/42', headers: as('alice') })).json()).toEqual({ id: '42' });
     expect((await e.app.inject({ url: '/api/m/demo/nothing', headers: as('alice') })).statusCode).toBe(204);
+    const dbl = await e.app.inject({ method: 'POST', url: '/api/m/demo/double', headers: { ...as('alice'), 'content-type': 'application/json' }, payload: { n: 4 } });
+    expect(dbl.json()).toEqual({ n: 8 });
     const bin = await e.app.inject({ url: '/api/m/demo/bin', headers: as('alice') });
     expect(bin.statusCode).toBe(200);
     expect(bin.headers['content-type']).toBe('image/png');

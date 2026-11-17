@@ -2,7 +2,6 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CONTRACT_VERSION } from '@dash/contract';
 import { createUser } from '../../src/auth/users.ts';
 import { createAudit } from '../../src/core/audit.ts';
 import { lanHostsOf } from '../../src/core/compose.ts';
@@ -37,7 +36,7 @@ describe('start()', () => {
     const s = await boot();
     const health = await fetch(`${s.address}/api/health`);
     expect(health.status).toBe(200);
-    expect(await health.json()).toMatchObject({ ok: true, contract: CONTRACT_VERSION });
+    expect(await health.json()).toMatchObject({ ok: true, contract: 2 });
 
     const now = (): Date => new Date();
     await createUser(

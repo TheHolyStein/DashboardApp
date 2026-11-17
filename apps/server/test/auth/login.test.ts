@@ -182,8 +182,8 @@ describe('me and prefs', () => {
     const me = await env.app.inject({ method: 'GET', url: '/api/me', headers: { cookie } });
     expect(me.json<{ csrf: string }>().csrf).toBe(csrf);
     expect(me.json()).toMatchObject({ prefs: { theme: 'default', modePolicy: 'system', locale: 'en', timeZone: 'UTC' } });
-    expect(me.body).not.toMatch(/password|argon2|totp/i);
-    expect(res.body).not.toMatch(/password|argon2|totp/i);
+    expect(me.body).not.toMatch(/password|argon2|totp(?!Enabled)/i);
+    expect(res.body).not.toMatch(/password|argon2|totp(?!Enabled)/i);
   });
 
   it('GET /api/me without a session → 401', async () => {

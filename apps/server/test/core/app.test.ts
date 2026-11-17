@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CONTRACT_VERSION, DashError } from '@dash/contract';
+import { DashError } from '@dash/contract';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../src/core/app.ts';
 import { loadConfig } from '../../src/core/config.ts';
@@ -47,7 +47,7 @@ describe('app', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<{ ok: boolean; contract: number; version: unknown }>();
     expect(body.ok).toBe(true);
-    expect(body.contract).toBe(CONTRACT_VERSION);
+    expect(body.contract).toBe(2);
     expect(typeof body.version).toBe('string');
   });
 

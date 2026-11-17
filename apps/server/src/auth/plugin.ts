@@ -38,6 +38,8 @@ declare module 'fastify' {
 export interface Me extends SessionUser {
   grants: Record<string, PermissionLevel>;
   csrf: string;
+  /** TOTP state `enabled` or `unreadable` (fail closed); a pending set-up is not enabled. */
+  totpEnabled: boolean;
   prefs: UserRow['prefs'];
 }
 
@@ -117,6 +119,7 @@ export function createAuthPlugin(opts: AuthPluginOpts): FastifyPluginAsync {
       role: user.role,
       grants,
       csrf,
+      totpEnabled: row ? opts.routes.totp.isEnabled(row.id, row.totpSecretEnc) : false,
       prefs: row?.prefs ?? { theme: 'default', modePolicy: 'system', locale: 'en', timeZone: 'UTC' },
     };
   };

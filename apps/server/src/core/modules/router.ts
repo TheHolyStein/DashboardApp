@@ -1,8 +1,10 @@
+import type { z } from 'zod';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BinaryResponse,
   DashError,
   type ModuleRouter,
+  type RouteHandler,
   type RouteOptions,
   type RouteRequest,
 } from '@dash/contract';
@@ -11,7 +13,6 @@ import type { LoadedModule } from './deps.js';
 import { requireCsrf } from '../csrf.js';
 import { ROOT_MOUNT_ALLOW } from './loader.js';
 
-type Handler = (req: RouteRequest) => Promise<unknown>;
 type RawHandler = Parameters<ModuleRouter['raw']>[1];
 
 const WEBDAV_METHODS = [
@@ -43,8 +44,8 @@ function resolveLevel(auth: AuthSeam, user: SessionUser, mod: LoadedModule): 'vi
   return level;
 }
 
-function validate(schema: RouteOptions['body'], value: unknown, where: 'body' | 'query'): unknown {
-  if (schema === undefined) return value;
+function validate<T>(schema: z.ZodType<T> | undefined, value: unknown, where: 'body' | 'query'): T {
+  if (schema === undefined) return value as T;
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw new DashError('invalid', `Invalid ${where}`, { in: where, issues: parsed.error.issues });
@@ -77,7 +78,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
   if (mod.failed !== undefined) return; // not mounted: /api/m/<id>/* falls through to the global 404
   const base = `/api/m/${mod.id}`;
 
-  const register = (method: string, path: string, opts: RouteOptions, h: Handler): void => {
+  const register = <B, Q>(method: string, path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void => {
     app.route({
       method,
       url: `${base}${path}`,
@@ -89,7 +90,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
         requireCsrf(request);
         const query = validate(opts.query, request.query, 'query');
         const body = validate(opts.body, request.body, 'body');
-        const result = await h({
+        const result = await h({ // sync or async handler
           user: userOf(user),
           level,
           params: { ...(request.params as Record<string, string>) },
