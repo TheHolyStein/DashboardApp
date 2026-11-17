@@ -57,6 +57,7 @@ function lttb(run: Point[], target: number): Point[] {
  * Largest-triangle-three-buckets. Keeps first and last point; returns the input unchanged when it already fits.
  * `null` values are gaps: each contiguous non-null run is reduced on its own (budget shared by length), gaps are kept
  * (consecutive gap points collapse to one). Pure: never mutates the input.
+ * Assumes timestamps are ascending (as the module data contract requires).
  */
 export function downsample(points: Point[], maxPoints: number): Point[] {
   if (points.length <= maxPoints) return points;
@@ -81,27 +82,67 @@ export function downsample(points: Point[], maxPoints: number): Point[] {
   for (const r of runs) {
     if (!Array.isArray(r[0])) { out.push(r as Point); continue; }
     const run = r as Point[];
-    out.push(...lttb(run, Math.max(2, Math.floor((budget * run.length) / nonNull))));
+    for (const q of lttb(run, Math.max(2, Math.floor((budget * run.length) / nonNull)))) out.push(q);
   }
   return out;
 }
 
 // ---------------------------------------------------------------- data
 
-export interface Merged { x: number[]; ys: Array<Array<number | null>> }
+/** `undefined` = alignment hole (series has no sample at this x; uPlot bridges it), `null` = real gap. */
+export type YValue = number | null | undefined;
+export interface Merged { x: number[]; ys: YValue[][] }
 
-/** Downsample every series and align them on one sorted x axis in epoch SECONDS (uPlot's unit); `null` where missing. */
+function sameTimestamps(series: ChartSeries[]): boolean {
+  const first = series[0]?.points;
+  if (!first || series.length < 2) return false;
+  return series.every((s) => {
+    if (s.points.length !== first.length) return false;
+    for (let i = 0; i < first.length; i++) if ((s.points[i] as Point)[0] !== (first[i] as Point)[0]) return false;
+    return true;
+  });
+}
+
+/**
+ * Downsample every series and align them on one sorted x axis in epoch SECONDS (uPlot's unit).
+ * Series sharing identical timestamps are reduced on one shared selection (LTTB on the series with most data), so
+ * they stay aligned without holes. Otherwise holes are `undefined`; only real gaps are `null`.
+ */
 export function mergeSeries(series: ChartSeries[], maxPoints: number): Merged {
-  const reduced = series.map((s) => downsample(s.points, maxPoints));
+  let reduced: Point[][];
+  if (sameTimestamps(series) && (series[0] as ChartSeries).points.length > maxPoints) {
+    let rep = series[0] as ChartSeries;
+    let best = -1;
+    for (const s of series) {
+      const n = s.points.reduce((c, p) => c + (isGap(p) ? 0 : 1), 0);
+      if (n > best) { best = n; rep = s; }
+    }
+    const keep = new Set<number>();
+    for (const p of downsample(rep.points, maxPoints)) keep.add(p[0]);
+    reduced = series.map((s) => s.points.filter((p) => keep.has(p[0])));
+  } else {
+    reduced = series.map((s) => downsample(s.points, maxPoints));
+  }
   const set = new Set<number>();
   for (const pts of reduced) for (const p of pts) set.add(p[0]);
   const xms = [...set].sort((a, b) => a - b);
   const ys = reduced.map((pts) => {
     const m = new Map<number, number | null>();
     for (const p of pts) m.set(p[0], isGap(p) ? null : p[1]);
-    return xms.map((t) => m.get(t) ?? null);
+    return xms.map((t): YValue => (m.has(t) ? (m.get(t) as number | null) : undefined));
   });
   return { x: xms.map((t) => t / 1000), ys };
+}
+
+/** Cheap change detector for merged data: shape, extremes and a rolling sum (no deep compare). */
+export function dataSignature(m: Merged): string {
+  const parts: Array<string | number> = [m.ys.length, m.x.length, m.x[0] ?? '', m.x[m.x.length - 1] ?? ''];
+  for (const ys of m.ys) {
+    let sum = 0;
+    for (const v of ys) sum = typeof v === 'number' ? (sum * 31 + v) % 1e12 : sum + (v === null ? 7 : 3);
+    parts.push(ys.length, ys[ys.length - 1] ?? 'u', sum);
+  }
+  return parts.join('|');
 }
 
 export const hasAnyData = (series: ChartSeries[]): boolean => series.some((s) => s.points.some((p) => !isGap(p)));
@@ -171,7 +212,7 @@ export function formatTooltipTime(sec: number, locale?: string, timeZone?: strin
 export interface TooltipModel { time: string; rows: Array<{ label: string; value: string; color: string }> }
 
 export function tooltipModel(
-  data: Array<Array<number | null> | number[]>, idx: number, labels: string[], palette: ChartPalette,
+  data: Array<YValue[] | number[]>, idx: number, labels: string[], palette: ChartPalette,
   unit: string | undefined, locale?: string, timeZone?: string,
 ): TooltipModel | null {
   const x = data[0]?.[idx];
@@ -179,7 +220,11 @@ export function tooltipModel(
   const fmt = makeNumberFormat(locale);
   return {
     time: formatTooltipTime(x, locale, timeZone),
-    rows: labels.map((label, i) => ({ label, value: formatValue(data[i + 1]?.[idx] ?? null, unit, fmt), color: seriesColor(palette, i) })),
+    // Alignment holes (undefined) show nothing; real gaps (null) show a dash.
+    rows: labels.flatMap((label, i) => {
+      const v = data[i + 1]?.[idx];
+      return v === undefined ? [] : [{ label, value: formatValue(v, unit, fmt), color: seriesColor(palette, i) }];
+    }),
   };
 }
 
@@ -214,7 +259,9 @@ export function summaryLabel(series: ChartSeries[], unit: string | undefined, lo
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- uPlot options/instances are loosely typed by design */
 /** The subset of uPlot the wrapper uses; tests provide a fake. */
 export interface PlotLike {
-  setData(data: Array<Array<number | null> | number[]>, resetScales?: boolean): void;
+  setData(data: Array<YValue[] | number[]>, resetScales?: boolean): void;
+  setCursor?(pos: { left: number; top: number }): void;
+  over?: HTMLElement;
   setSize(size: { width: number; height: number }): void;
   redraw(rebuildPaths?: boolean, recalcAxes?: boolean): void;
   destroy(): void;
@@ -236,10 +283,14 @@ export const defaultLoadPlot: LoadPlot = async () => {
 
 export interface BuildInput {
   kind: ChartKind; labels: string[]; palette: ChartPalette; unit?: string | undefined; width: number; height: number;
-  locale?: string | undefined; timeZone?: string | undefined; mod?: PlotModule | undefined; reducedEffects?: boolean;
+  locale?: string | undefined; timeZone?: string | undefined; mod?: PlotModule | undefined;
+  /** Mutable holder read at draw time; `applyPalette` updates it so glow follows palette changes without re-creation. */
+  live?: LivePalette;
   /** Called with the uPlot instance when the cursor moves (non-spark). */
   onCursor?: (u: any) => void;
 }
+
+export interface LivePalette { palette: ChartPalette; reduced: () => boolean }
 
 export function prefersReducedEffects(): boolean {
   try {
@@ -251,7 +302,7 @@ export function buildOptions(b: BuildInput): Record<string, any> {
   const { kind, palette: p } = b;
   const spark = kind === 'spark';
   const fmt = makeNumberFormat(b.locale);
-  const glow = p.glow && !spark && !b.reducedEffects;
+  const live = b.live ?? { palette: p, reduced: prefersReducedEffects };
   const bars = kind === 'bar' ? b.mod?.paths?.bars?.({ size: [0.8, 64] }) : undefined;
   const series: Array<Record<string, unknown>> = [{}];
   b.labels.forEach((label, i) => {
@@ -264,9 +315,12 @@ export function buildOptions(b: BuildInput): Record<string, any> {
     series.push(s);
   });
   const hooks: Record<string, unknown[]> = {};
-  if (glow) {
-    // drawSeries fires after each series, so set the shadow once before series are drawn and clear it afterwards.
-    hooks.drawAxes = [(u: any) => { u.ctx.shadowBlur = 6; u.ctx.shadowColor = seriesColor(p, 0); }];
+  if (!spark) {
+    // drawSeries fires after each series, so set the shadow before series (drawAxes) and clear it afterwards.
+    // Glow is decided at draw time from the live palette and the reduced-effects preference.
+    hooks.drawAxes = [(u: any) => {
+      if (live.palette.glow && !live.reduced()) { u.ctx.shadowBlur = 6; u.ctx.shadowColor = seriesColor(live.palette, 0); }
+    }];
     hooks.draw = [(u: any) => { u.ctx.shadowBlur = 0; }];
   }
   if (!spark && b.onCursor) hooks.setCursor = [b.onCursor];
@@ -294,7 +348,8 @@ export function buildOptions(b: BuildInput): Record<string, any> {
 }
 
 /** Recolour an existing plot in place (uPlot converts colour options to functions on init, so assign functions). */
-export function applyPalette(plot: PlotLike, kind: ChartKind, p: ChartPalette): void {
+export function applyPalette(plot: PlotLike, kind: ChartKind, p: ChartPalette, live?: LivePalette): void {
+  if (live) live.palette = p;
   for (let i = 1; i < plot.series.length; i++) {
     const s = plot.series[i] as Record<string, any>;
     const c = seriesColor(p, i - 1);

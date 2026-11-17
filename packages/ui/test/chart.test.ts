@@ -18,6 +18,8 @@ class FakePlot {
   setSize = vi.fn();
   redraw = vi.fn();
   destroy = vi.fn();
+  setCursor = vi.fn();
+  over = document.createElement('div');
   constructor(opts: any, data: unknown, public target: HTMLElement) {
     this.opts = opts;
     this.data = data;
@@ -92,13 +94,27 @@ describe('downsample', () => {
 });
 
 describe('mergeSeries', () => {
-  it('series with different timestamps are merged with null fill', () => {
+  it('series with different timestamps are merged with undefined alignment holes, real gaps stay null', () => {
     const m = mergeSeries([
       { label: 'a', points: [[1000, 1], [3000, 3]] },
       { label: 'b', points: [[2000, 20], [3000, 30]] },
     ], 300);
     expect(m.x).toEqual([1, 2, 3]);
-    expect(m.ys).toEqual([[1, null, 3], [null, 20, 30]]);
+    expect(m.ys).toStrictEqual([[1, undefined, 3], [undefined, 20, 30]]);
+    const g = mergeSeries([
+      { label: 'a', points: [[1000, 1], [2000, null], [3000, 3]] },
+      { label: 'b', points: [[1000, 5], [2500, 6]] },
+    ], 300);
+    expect(g.x).toEqual([1, 2, 2.5, 3]);
+    expect(g.ys[0]).toStrictEqual([1, null, undefined, 3]);
+  });
+
+  it('two long series with identical timestamps stay aligned (value at every merged x) after downsampling', () => {
+    const a = Array.from({ length: 1000 }, (_, i): Point => [i * 1000, Math.sin(i / 15)]);
+    const b = Array.from({ length: 1000 }, (_, i): Point => [i * 1000, Math.cos(i / 7) * (i % 90 === 0 ? 5 : 1)]);
+    const m = mergeSeries([{ label: 'a', points: a }, { label: 'b', points: b }], 100);
+    expect(m.x.length).toBeLessThanOrEqual(100);
+    for (const ys of m.ys) { expect(ys).toHaveLength(m.x.length); expect(ys.every((v) => typeof v === 'number')).toBe(true); }
   });
 });
 
@@ -207,5 +223,79 @@ describe('Chart', () => {
   it('uses the ariaLabel prop when given', async () => {
     const { container } = await mount({ series: [{ label: 'a', points: pts([1, 2]) }], ariaLabel: 'Load' });
     expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Load');
+  });
+
+  const two = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `s${i}`, points: pts([1, 2, 3 + i]) }));
+
+  it('re-creates the plot (destroying the old one) when the series count grows, shrinks or a label changes', async () => {
+    const r = await mount({ series: two(1) });
+    await r.rerender({ series: two(2) });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(2);
+    expect(FakePlot.instances[0]?.destroy).toHaveBeenCalledTimes(1);
+    expect(lastPlot().opts.series).toHaveLength(3);
+    await r.rerender({ series: two(1) });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(3);
+    expect(lastPlot().opts.series).toHaveLength(2);
+    await r.rerender({ series: [{ label: 'renamed', points: pts([1, 2]) }] });
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(4);
+    expect(lastPlot().setData).not.toHaveBeenCalled();
+  });
+
+  it('skips setData when the data did not change', async () => {
+    const r = await mount({ series: [{ label: 'a', points: pts([1, 2, 3]) }] });
+    await r.rerender({ series: [{ label: 'a', points: pts([1, 2, 3]) }] });
+    flushSync();
+    expect(lastPlot().setData).not.toHaveBeenCalled();
+  });
+
+  it('glow follows the live palette and is decided at draw time without re-creating the plot', async () => {
+    const seam = makeThemeSeam(pal(['#111111'], { glow: false }));
+    await mount({ series: [{ label: 'a', points: pts([1, 2]) }] }, new Map([[THEME_KEY, seam]]));
+    const p = lastPlot();
+    const ctx: any = { shadowBlur: 0, shadowColor: '' };
+    p.opts.hooks.drawAxes[0]({ ctx });
+    expect(ctx.shadowBlur).toBe(0);
+    seam.set(pal(['#ff0000'], { glow: true }), 'night');
+    flushSync();
+    expect(FakePlot.instances).toHaveLength(1);
+    p.opts.hooks.drawAxes[0]({ ctx });
+    expect(ctx.shadowBlur).toBeGreaterThan(0);
+    expect(ctx.shadowColor).toBe('#ff0000');
+    p.opts.hooks.draw[0]({ ctx });
+    expect(ctx.shadowBlur).toBe(0);
+    seam.set(pal(['#00ff00'], { glow: true }), 'day');
+    flushSync();
+    p.opts.hooks.drawAxes[0]({ ctx });
+    expect(ctx.shadowColor).toBe('#00ff00');
+  });
+
+  it('touch moves set the cursor and touch end hides the tooltip', async () => {
+    const { container } = await mount({ series: [{ label: 'a', points: pts([1, 2]) }] });
+    const p = lastPlot();
+    p.over.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200, height: 100 }) as DOMRect;
+    expect(p.over.style.touchAction).toBe('pan-y');
+    const ev = new Event('touchmove', { cancelable: true });
+    Object.assign(ev, { touches: [{ clientX: 60, clientY: 50 }] });
+    p.over.dispatchEvent(ev);
+    expect(p.setCursor).toHaveBeenCalledWith({ left: 50, top: 30 });
+    const tip = container.querySelector('.tip') as HTMLElement;
+    tip.hidden = false;
+    p.over.dispatchEvent(new Event('touchend'));
+    expect(tip.hidden).toBe(true);
+    expect(p.setCursor).toHaveBeenLastCalledWith({ left: -10, top: -10 });
+  });
+
+  it('removes touch listeners on destroy', async () => {
+    const r = await mount({ series: [{ label: 'a', points: pts([1, 2]) }] });
+    const p = lastPlot();
+    r.unmount();
+    p.setCursor.mockClear();
+    const ev = new Event('touchstart');
+    Object.assign(ev, { touches: [{ clientX: 1, clientY: 1 }] });
+    p.over.dispatchEvent(ev);
+    expect(p.setCursor).not.toHaveBeenCalled();
   });
 });

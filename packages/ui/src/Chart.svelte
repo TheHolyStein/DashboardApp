@@ -4,9 +4,9 @@
   import Empty from './Empty.svelte';
   import { useT } from './context.js';
   import {
-    DEFAULT_PALETTE, THEME_KEY, applyPalette, buildOptions, defaultLoadPlot, hasAnyData, mergeSeries,
+    DEFAULT_PALETTE, THEME_KEY, applyPalette, buildOptions, dataSignature, defaultLoadPlot, hasAnyData, mergeSeries,
     prefersReducedEffects, renderTooltip, summaryLabel, tooltipModel,
-    type ChartKind, type ChartSeries, type LoadPlot, type PlotLike, type PlotModule,
+    type ChartKind, type ChartSeries, type LivePalette, type LoadPlot, type PlotLike, type PlotModule,
   } from './chart.js';
 
   interface Props {
@@ -48,6 +48,8 @@
   let plot: PlotLike | undefined;
   let width = 0;
   let plotData: unknown;
+  let plotSig = '';
+  let live: LivePalette | undefined;
   let appliedPalette: ChartPalette | undefined;
 
   // Load uPlot lazily, and only when there is something to draw.
@@ -76,35 +78,76 @@
     tip.style.top = `${Math.max(0, Math.min(top, Math.max(0, maxH)))}px`;
   }
 
-  // Create the plot; re-create only when kind/height/locale/unit change or the module arrives.
+  // Series count and ordered labels: a different shape needs a different plot (setData cannot add/remove series).
+  const shapeKey = $derived(`${series.length}\u0000${series.map((s) => s.label).join('\u0000')}`);
+
+  function touchPos(over: HTMLElement, ev: Event): { left: number; top: number } | null {
+    const touch = (ev as TouchEvent).touches?.[0];
+    if (!touch) return null;
+    const r = over.getBoundingClientRect();
+    return { left: touch.clientX - r.left, top: touch.clientY - r.top };
+  }
+
+  // Create the plot; re-create when kind/height/locale/unit/series shape change or the module arrives.
   $effect(() => {
     const M = mod;
     const el = plotEl;
     const k = kindD;
     const ht = h;
-    void localeD; void zoneD; void unitD;
+    void localeD; void zoneD; void unitD; void shapeKey;
     if (!M || !el || !hasData) return;
     return untrack(() => {
       const data = merged;
+      live = { palette, reduced: prefersReducedEffects };
       const opts = buildOptions({
         kind: k, labels: series.map((s) => s.label), palette, unit, width: width || el.clientWidth || 300, height: ht,
-        locale, timeZone, mod: M, reducedEffects: prefersReducedEffects(), onCursor,
+        locale, timeZone, mod: M, live, onCursor,
       });
       plotData = data;
+      plotSig = dataSignature(data);
       appliedPalette = palette;
       const p = new M(opts, [data.x, ...data.ys], el);
       plot = p;
       ready = true;
-      return () => { p.destroy(); plot = undefined; ready = false; };
+
+      // uPlot binds mouse events only: track touches on the overlay ourselves.
+      const over = k === 'spark' ? undefined : p.over;
+      const onTouch = (ev: Event): void => {
+        const pos = touchPos(over as HTMLElement, ev);
+        if (pos) p.setCursor?.(pos);
+      };
+      const onEnd = (): void => {
+        p.setCursor?.({ left: -10, top: -10 });
+        if (tipEl) tipEl.hidden = true;
+      };
+      if (over) {
+        over.style.touchAction = 'pan-y';
+        over.addEventListener('touchstart', onTouch, { passive: true });
+        over.addEventListener('touchmove', onTouch, { passive: true });
+        over.addEventListener('touchend', onEnd, { passive: true });
+        over.addEventListener('touchcancel', onEnd, { passive: true });
+      }
+      return () => {
+        if (over) {
+          over.removeEventListener('touchstart', onTouch);
+          over.removeEventListener('touchmove', onTouch);
+          over.removeEventListener('touchend', onEnd);
+          over.removeEventListener('touchcancel', onEnd);
+        }
+        p.destroy(); plot = undefined; ready = false;
+      };
     });
   });
 
-  // New data -> setData on the existing plot.
+  // New data (same shape) -> setData on the existing plot, unless nothing changed.
   $effect(() => {
     const data = merged;
     untrack(() => {
       if (!plot || data === plotData) return;
       plotData = data;
+      const sig = dataSignature(data);
+      if (sig === plotSig) return;
+      plotSig = sig;
       plot.setData([data.x, ...data.ys]);
     });
   });
@@ -115,7 +158,7 @@
     untrack(() => {
       if (!plot || p === appliedPalette) return;
       appliedPalette = p;
-      applyPalette(plot, kind, p);
+      applyPalette(plot, kind, p, live);
     });
   });
 
