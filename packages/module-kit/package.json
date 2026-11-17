@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
     "./client": "./src/suite-client.ts",
+    "./theme": "./src/suite-theme.ts",
     "./vitest": "./src/vitest.ts"
   },
   "scripts": {

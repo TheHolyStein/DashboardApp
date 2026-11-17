@@ -23,6 +23,13 @@ const elements = [
     mode: 'full',
     capture: [],
   },
+  // Theme test files may use the kit's theme suite (`@dash/module-kit/theme`); theme runtime files may not.
+  // Listed before `theme` because the first match wins.
+  { type: 'theme-test', pattern: 'themes/*/tests', mode: 'folder', capture: ['id'] },
+  { type: 'theme-test', pattern: 'themes/*/vitest.config.ts', mode: 'full', capture: ['id'] },
+  // Test fixtures standing in for a theme runtime file and a theme test file of theme "aaa".
+  { type: 'theme', pattern: 'tools/lint-fixtures/bad-theme-kit-import.ts', mode: 'full', capture: [] },
+  { type: 'theme-test', pattern: 'tools/lint-fixtures/ok-theme-test-kit-import.ts', mode: 'full', capture: [] },
   { type: 'theme', pattern: 'themes/*', mode: 'folder', capture: ['id'] },
 ];
 
@@ -99,6 +106,10 @@ export default tseslint.config(
             {
               from: 'theme',
               allow: ['contract', 'ui', ['theme', { id: '${from.id}' }]],
+            },
+            {
+              from: 'theme-test',
+              allow: ['contract', 'ui', 'module-kit', ['theme', { id: '${from.id}' }]],
             },
           ],
         },

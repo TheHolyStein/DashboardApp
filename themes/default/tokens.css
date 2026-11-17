@@ -1,0 +1,56 @@
+/* Every token in REQUIRED_TOKENS (@dash/contract) must be defined for both modes. */
+
+:root[data-theme="default"][data-mode="day"] {
+  --db-bg: #f4f5f8;
+  --db-fg: #1a1d23;
+  --db-muted: #4a5160;
+  --db-accent: #1d4ed8;
+  --db-accent-2: #b45309;
+  --db-surface: #ffffff;
+  --db-surface-2: #eceef3;
+  --db-border-color: #d5d9e0;
+  --db-border: 1px solid var(--db-border-color);
+  --db-radius: 12px;
+  --db-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  --db-font-body: system-ui, sans-serif;
+  --db-font-heading: system-ui, sans-serif;
+  --db-font-mono: ui-monospace, monospace;
+  --db-font-display: system-ui, sans-serif;
+  --db-ok: #047857;
+  --db-warn: #b45309;
+  --db-crit: #be123c;
+  --db-focus: #1d4ed8;
+  --db-tile-pad: 16px;
+  --db-gap: 12px;
+  --db-tile-clip: none;
+  --db-heading-case: none;
+  --db-heading-track: normal;
+}
+
+:root[data-theme="default"][data-mode="night"] {
+  --db-bg: #0f1218;
+  --db-fg: #e8eaee;
+  --db-muted: #a3aab8;
+  --db-accent: #7aa2ff;
+  --db-accent-2: #fbbf24;
+  --db-surface: #181c24;
+  --db-surface-2: #222733;
+  --db-border-color: #2a303c;
+  --db-border: 1px solid var(--db-border-color);
+  --db-radius: 12px;
+  --db-shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+  --db-font-body: system-ui, sans-serif;
+  --db-font-heading: system-ui, sans-serif;
+  --db-font-mono: ui-monospace, monospace;
+  --db-font-display: system-ui, sans-serif;
+  --db-ok: #34d399;
+  --db-warn: #fbbf24;
+  --db-crit: #fb7185;
+  --db-focus: #7aa2ff;
+  --db-tile-pad: 16px;
+  --db-gap: 12px;
+  --db-tile-clip: none;
+  --db-heading-case: none;
+  --db-heading-track: normal;
+}
+
