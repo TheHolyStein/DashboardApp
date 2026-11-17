@@ -9,7 +9,6 @@
   let { data, settings, size, mode, t, openDetail }: TileProps<Snapshot, Settings> = $props();
 
   /** The slice of the shell's theme seam this tile uses (context `dash:theme`; absent in module tests). */
-  // eslint-disable-next-line no-unused-vars -- the base rule misreads parameter names in type signatures in .svelte files
   type ThemeSeam = { readonly id?: string; clockFace?(id?: string): Promise<Component<ClockFaceProps>> };
   const theme = getContext<ThemeSeam | undefined>('dash:theme');
 

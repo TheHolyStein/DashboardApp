@@ -4,7 +4,8 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChartPalette } from '@dash/contract';
 import { Chart, downsample } from '../src/index.js';
-import { DEFAULT_PALETTE, THEME_KEY, mergeSeries, type Point, type PlotModule } from '../src/chart.js';
+import { THEME_CONTEXT_KEY as THEME_KEY } from '@dash/contract';
+import { DEFAULT_PALETTE, mergeSeries, type Point, type PlotModule } from '../src/chart.js';
 import { makeThemeSeam } from './chart-theme.svelte.js';
 
 class FakePlot {

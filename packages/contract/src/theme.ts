@@ -1,7 +1,7 @@
 import type { Component } from 'svelte';
 import type { z } from 'zod';
 import type { WeatherCondition } from './events.js';
-import type { TileProps } from './client.js';
+import type { ModuleClient, TileProps } from './client.js';
 import { ID_RE, type Intensity, type Mode, type ModuleId, type ThemeId, type TileSize } from './ids.js';
 import { SEMVER_RE } from './manifest.js';
 
@@ -57,4 +57,18 @@ export function validateTheme(m: ThemeManifest): string[] {
   if (m.pane.durationMs > MAX_PANE_MS) problems.push(`pane durationMs ${m.pane.durationMs} exceeds ${MAX_PANE_MS}`);
 
   return problems;
+}
+
+/** What the theme engine provides under `THEME_CONTEXT_KEY`. Absent context means no theme overrides. */
+export interface ThemeSeam {
+  /** A full tile replacement for the module at this size (theme `minSize` rules apply), or null to use the module's own tile. */
+  tileFor(moduleId: ModuleId, size?: TileSize): Promise<ModuleClient['Tile'] | null>;
+  /** Identity of the active theme; reactive when present, so a theme switch re-resolves overrides. */
+  readonly id?: string;
+  clockFace?: (id?: string) => Promise<Component<any>>; // eslint-disable-line @typescript-eslint/no-explicit-any -- face props are the theme's contract
+  chart?: () => ChartPalette;
+  /** Current colour mode; read inside reactive code, so a getter keeps it live. */
+  readonly mode?: Mode;
+  /** Theme icon source; wins over module-provided icons for the same name. */
+  icon?: (name: string) => string | undefined;
 }

@@ -1,4 +1,8 @@
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
+/** Svelte context keys the shell/theme engine provide; modules and `@dash/ui` read them through these constants. */
+export const THEME_CONTEXT_KEY = 'dash:theme';
+export const T_CONTEXT_KEY = 'dash:t';
+export const ICONS_CONTEXT_KEY = 'dash:icons';
 export const ID_RE = /^[a-z][a-z0-9-]{1,31}$/;
 export type ModuleId = string;
 export type ThemeId = string;

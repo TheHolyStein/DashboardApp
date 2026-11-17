@@ -13,8 +13,10 @@
       timeZone,
     }).formatToParts(now);
     const get = (t: string): number => Number(f.find((p) => p.type === t)?.value ?? 0);
-    return { h: get('hour') % 12, m: get('minute'), s: get('second') };
+    return { h: get('hour') % 12, h24: get('hour') % 24, m: get('minute'), s: get('second') };
   });
+  // The time as text for assistive technology (the hands are an image).
+  const spoken = $derived(`${String(parts.h24).padStart(2, '0')}:${String(parts.m).padStart(2, '0')}`);
   const hourDeg = $derived((parts.h + parts.m / 60) * 30);
   const minuteDeg = $derived((parts.m + parts.s / 60) * 6);
   const secondDeg = $derived(parts.s * 6);
@@ -22,7 +24,7 @@
 </script>
 
 <div class="analog">
-  <svg viewBox="-50 -50 100 100" role="img" aria-label={label ?? 'Analog clock'}>
+  <svg viewBox="-50 -50 100 100" role="img" aria-label={`${label ?? 'Analog clock'}, ${spoken}`}>
     <circle r="47" class="face" />
     {#each ticks as deg (deg)}
       <line x1="0" y1="-41" x2="0" y2={deg % 90 === 0 ? -36 : -38.5} transform={`rotate(${deg})`} class="tick" />

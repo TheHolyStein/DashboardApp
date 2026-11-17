@@ -11,6 +11,7 @@ export const UserDto = z.object({
 export const MeDto = UserDto.extend({
   grants: z.record(z.string(), z.enum(['none', 'view', 'edit'])),
   csrf: z.string(),
+  totpEnabled: z.boolean(),
   prefs: z.object({
     theme: z.string(),
     modePolicy: z.enum(['day', 'night', 'system', 'sun']),
@@ -59,6 +60,9 @@ export const NotificationDto = z.object({
   level: z.enum(['info', 'warn', 'critical']),
   title: z.string(),
   body: z.string().nullable(),
+  titleKey: z.string().nullable(),
+  bodyKey: z.string().nullable(),
+  vars: z.record(z.string(), z.union([z.string(), z.number()])).nullable(),
   url: z.string().nullable(),
   createdAt: z.string(),
   readAt: z.string().nullable(),

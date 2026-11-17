@@ -25,18 +25,22 @@ export interface RouteRequest<B = unknown, Q = unknown> {
   raw: unknown;
 }
 
-export interface RouteOptions {
+export interface RouteOptions<B = unknown, Q = unknown> {
   level: 'view' | 'edit';
-  body?: z.ZodType;
-  query?: z.ZodType;
+  /** Validated by the server (422 on failure); `req.body` is then `z.infer` of it. */
+  body?: z.ZodType<B>;
+  query?: z.ZodType<Q>;
 }
 
+/** May return a value or a promise of one (`unknown` already covers `Promise<unknown>`). */
+export type RouteHandler<B = unknown, Q = unknown> = (req: RouteRequest<B, Q>) => unknown;
+
 export interface ModuleRouter {
-  get(path: string, opts: RouteOptions, h: (req: RouteRequest) => Promise<unknown>): void;
-  post(path: string, opts: RouteOptions, h: (req: RouteRequest) => Promise<unknown>): void;
-  put(path: string, opts: RouteOptions, h: (req: RouteRequest) => Promise<unknown>): void;
-  patch(path: string, opts: RouteOptions, h: (req: RouteRequest) => Promise<unknown>): void;
-  delete(path: string, opts: RouteOptions, h: (req: RouteRequest) => Promise<unknown>): void;
+  get<B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void;
+  post<B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void;
+  put<B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void;
+  patch<B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void;
+  delete<B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, h: RouteHandler<B, Q>): void;
   // only for manifest.rootMounts
   raw(
     prefix: string,

@@ -18,3 +18,9 @@ test('a theme test file importing the module kit is allowed', async () => {
   const [res] = await eslint.lintFiles(['tools/lint-fixtures/ok-theme-test-kit-import.ts']);
   expect(res!.messages.filter((m) => m.ruleId === 'boundaries/element-types')).toEqual([]);
 });
+
+test('a function type parameter name in a .svelte script is not flagged as unused', async () => {
+  const eslint = new ESLint();
+  const [res] = await eslint.lintFiles(['tools/lint-fixtures/svelte-type-signature.svelte']);
+  expect(res!.messages.filter((m) => m.ruleId?.includes('no-unused-vars'))).toEqual([]);
+});

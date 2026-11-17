@@ -2,7 +2,7 @@ import { createRawSnippet } from 'svelte';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { Button, Empty, Field, Icon, Pane, Stale, Tile } from '../src/index.js';
+import { Button, Empty, Field, Icon, Pane, Stale, Tile, serial } from '../src/index.js';
 
 const text = (s: string) => createRawSnippet(() => ({ render: () => `<span>${s}</span>` }));
 const input = createRawSnippet(() => ({ render: () => '<input type="text">' }));
@@ -144,6 +144,47 @@ describe('Button', () => {
     const btn = screen.getByRole<HTMLButtonElement>('button');
     expect(btn.className).toContain('danger');
     expect(btn.disabled).toBe(true);
+  });
+
+  it('busy disables the button and sets aria-busy without changing its content; idle has no aria-busy', async () => {
+    const onclick = vi.fn();
+    const a = render(Button, { props: { busy: true, onclick, children: text('Save') } });
+    const btn = screen.getByRole<HTMLButtonElement>('button');
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.textContent).toBe('Save');
+    await userEvent.click(btn);
+    expect(onclick).not.toHaveBeenCalled();
+    a.unmount();
+    render(Button, { props: { children: text('Save') } });
+    const idle = screen.getByRole<HTMLButtonElement>('button');
+    expect(idle.disabled).toBe(false);
+    expect(idle.hasAttribute('aria-busy')).toBe(false);
+  });
+});
+
+describe('serial', () => {
+  it('runs calls one after another, each call gets its own result, and a failure does not block the queue', async () => {
+    const log: string[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const fn = serial(async (name: string) => {
+      log.push(`start ${name}`);
+      if (name === 'a') await gate;
+      if (name === 'b') throw new Error('boom');
+      log.push(`end ${name}`);
+      return name.toUpperCase();
+    });
+    const a = fn('a');
+    const b = fn('b');
+    const c = fn('c');
+    await Promise.resolve();
+    expect(log).toEqual(['start a']);
+    release?.();
+    expect(await a).toBe('A');
+    await expect(b).rejects.toThrow('boom');
+    expect(await c).toBe('C');
+    expect(log).toEqual(['start a', 'end a', 'start b', 'start c', 'end c']);
   });
 });
 

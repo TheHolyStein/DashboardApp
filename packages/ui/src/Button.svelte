@@ -4,13 +4,15 @@
 
   type Props = Omit<HTMLButtonAttributes, 'children'> & {
     variant?: 'primary' | 'ghost' | 'danger';
+    /** Work in progress: disabled and `aria-busy`, same size and label (no layout shift). */
+    busy?: boolean;
     children?: Snippet;
   };
   // `rest` carries data-edit, aria-* and any other native attribute.
-  let { variant = 'ghost', type = 'button', disabled, onclick, children, ...rest }: Props = $props();
+  let { variant = 'ghost', type = 'button', disabled, busy = false, onclick, children, ...rest }: Props = $props();
 </script>
 
-<button class="btn {variant}" {type} {disabled} {onclick} {...rest}>{@render children?.()}</button>
+<button class="btn {variant}" class:busy {type} disabled={disabled || busy} aria-busy={busy ? 'true' : undefined} {onclick} {...rest}>{@render children?.()}</button>
 
 <style>
   .btn {
@@ -22,6 +24,7 @@
   .primary { background: var(--db-surface); border: 2px solid var(--db-accent); color: var(--db-fg); }
   .danger { background: var(--db-surface); border: 2px solid var(--db-crit); color: var(--db-fg); }
   .ghost:hover:not(:disabled) { background: var(--db-surface-2, #eef0f4); }
+  .btn.busy { cursor: progress; }
   .btn:disabled { opacity: 0.55; cursor: not-allowed; }
   .btn:focus-visible { outline: 2px solid var(--db-focus, #1d4ed8); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }

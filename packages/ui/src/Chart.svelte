@@ -1,10 +1,10 @@
 <script lang="ts">
   import { getContext, untrack } from 'svelte';
-  import type { ChartPalette, Mode } from '@dash/contract';
+  import { THEME_CONTEXT_KEY, type ChartPalette, type Mode } from '@dash/contract';
   import Empty from './Empty.svelte';
   import { useT } from './context.js';
   import {
-    DEFAULT_PALETTE, THEME_KEY, applyPalette, buildOptions, defaultLoadPlot, hasAnyData, mergeSeries, sameMerged,
+    DEFAULT_PALETTE, applyPalette, buildOptions, defaultLoadPlot, hasAnyData, mergeSeries, sameMerged,
     prefersReducedEffects, renderTooltip, summaryLabel, tooltipModel,
     type ChartKind, type ChartSeries, type LivePalette, type Merged, type LoadPlot, type PlotLike, type PlotModule,
   } from './chart.js';
@@ -24,7 +24,7 @@
   let { kind, series, unit, height, maxPoints = 300, ariaLabel, locale, timeZone, loadPlot, resizeObserver }: Props = $props();
 
   const t = useT();
-  const theme = getContext<{ chart?: () => ChartPalette; readonly mode?: Mode } | undefined>(THEME_KEY);
+  const theme = getContext<{ chart?: () => ChartPalette; readonly mode?: Mode } | undefined>(THEME_CONTEXT_KEY);
 
   // Primitive deriveds dedupe, so unrelated prop updates (e.g. new `series`) never re-create the plot.
   const kindD = $derived(kind);

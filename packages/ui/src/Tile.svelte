@@ -13,6 +13,7 @@
     updatedAt,
     now,
     onSettings,
+    onOpen,
     children,
   }: {
     title: string;
@@ -21,6 +22,8 @@
     updatedAt?: string | null | undefined;
     now?: Date | undefined;
     onSettings?: (() => void) | undefined;
+    /** Makes the title a button that opens the detail view. */
+    onOpen?: (() => void) | undefined;
     children?: Snippet | undefined;
   } = $props();
 
@@ -30,7 +33,7 @@
 </script>
 
 <article class="surface" class:is-stale={stale}>
-  <TileHeader {title} {icon} {onSettings} />
+  <TileHeader {title} {icon} {onSettings} {onOpen} />
   <div class="body">{@render children?.()}</div>
   {#if updatedAt || stale}
     <footer class="foot">

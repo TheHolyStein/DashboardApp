@@ -23,6 +23,10 @@ export interface Notification {
   level: 'info' | 'warn' | 'critical';
   title: string;
   body?: string;
+  /** Translation keys; clients render `t(titleKey, title, vars)`. `title`/`body` stay the English fallback (also used for push). */
+  titleKey?: string;
+  bodyKey?: string;
+  vars?: Record<string, string | number>;
   dedupeKey?: string;                       // same key within 24 h updates instead of adding
   userIds?: UserId[];                       // default: all users with view on this module
   url?: string;                             // deep link inside dashboard
@@ -49,6 +53,9 @@ export interface NotificationRecord {
   level: 'info' | 'warn' | 'critical';
   title: string;
   body: string | null;
+  titleKey: string | null;
+  bodyKey: string | null;
+  vars: Record<string, string | number> | null;
   url: string | null;
   createdAt: string;
   readAt: string | null;

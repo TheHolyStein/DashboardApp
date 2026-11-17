@@ -396,6 +396,19 @@ const stubApi = {
   delete: () => Promise.reject(new Error('api is not available in the theme contract suite')),
 };
 
+/** True when the face shows the hour and minute as visible text, or as the aria-label of a role="img" element. */
+function exposesTime(container: HTMLElement, props: ClockFaceProps): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: '2-digit', hourCycle: 'h23', timeZone: props.timeZone }).formatToParts(props.now);
+  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const h24 = get('hour') % 24;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const mm = String(get('minute')).padStart(2, '0');
+  const hours = [...new Set([h24, h12].flatMap((h) => [String(h), String(h).padStart(2, '0')]))];
+  const re = new RegExp(`(?<!\\d)(?:${hours.join('|')})\\s?(?:[:.h]|\\s)\\s?${mm}(?!\\d)`, 'i');
+  const texts = [container.textContent ?? '', ...[...container.querySelectorAll('[role="img"]')].map((el) => el.getAttribute('aria-label') ?? '')];
+  return texts.some((t) => re.test(t));
+}
+
 const FIXED_NOW = new Date('2026-06-21T14:05:09.000Z');
 const FIXED_ENV: SceneEnv = { sunAltitudeDeg: 35, weather: 'clear', moonPhase: 0.25, now: FIXED_NOW };
 
@@ -516,6 +529,9 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
                   try {
                     const { container } = render(Face, { props });
                     if (container.innerHTML.trim() === '') fail(`${what} rendered nothing`);
+                    if (!exposesTime(container, props)) {
+                      fail(`${what} does not expose the time as text: render visible text with the hour and minute, or role="img" with an aria-label containing them`);
+                    }
                   } catch (e) {
                     fail(e instanceof Error && e.message.startsWith('clock face') ? e.message : `${what} threw: ${String(e)}`);
                   } finally {

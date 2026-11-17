@@ -45,4 +45,6 @@ export interface ModuleClient {
   Detail: Component<DetailProps<any, any>>;
   Settings?: Component<SettingsProps<any>>;
   icons?: Record<string, string>; // extra svg strings keyed by name
+  /** Whether the shell makes the whole tile open the detail pane (default true). `false` for tiles without a detail view. */
+  detail?: boolean;
 }

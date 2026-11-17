@@ -23,7 +23,10 @@ const stubApi: ModuleApi = {
   delete: () => Promise.reject(new Error('api.delete is not available in the contract suite')),
 };
 
-const identityT: Translate = (_key, fallback) => fallback;
+/** Same behaviour as the shell's fallback translator: the fallback with `{name}` replaced from `vars`. */
+const identityT: Translate = (_key, fallback, vars) =>
+  vars ? fallback.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : fallback;
+/** Marks the key; the fallback and its vars are replaced by the marker, so interpolated text is never mistaken for bare text. */
 const markedT: Translate = (key) => `${MARK_OPEN}${key}${MARK_CLOSE}`;
 
 function fail(msg: string): never {
@@ -38,10 +41,12 @@ function collectStrings(value: unknown, out: string[]): string[] {
   return out;
 }
 
+/** Visible text nodes, except text inside an element with the `data-value` attribute (formatted numbers, times, dates are data, not words). */
 function textNodes(root: Node): string[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const out: string[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.parentElement?.closest('[data-value]')) continue;
     const text = n.textContent?.trim();
     if (text) out.push(text);
   }

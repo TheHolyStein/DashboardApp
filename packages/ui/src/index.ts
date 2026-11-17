@@ -1,3 +1,6 @@
+// Travels with @dash/ui so modules type-check the uPlot stylesheet import without declaring it themselves.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- an ambient declaration cannot be imported at runtime
+/// <reference path="./css-modules.d.ts" />
 export { default as Tile } from './Tile.svelte';
 export { default as TileHeader } from './TileHeader.svelte';
 export { default as Pane } from './Pane.svelte';
@@ -10,5 +13,6 @@ export { default as Chart } from './Chart.svelte';
 export { downsample } from './chart.js';
 export type { ChartKind, ChartSeries } from './chart.js';
 export { formatRelative } from './relative.js';
+export { serial } from './serial.js';
 export { T_KEY, ICONS_KEY, identityT } from './context.js';
 export type { IconSource } from './context.js';

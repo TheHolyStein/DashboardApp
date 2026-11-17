@@ -1,8 +1,5 @@
 import type { ChartPalette, Translate } from '@dash/contract';
 
-/** Svelte context key under which the theme engine provides `{ chart(), mode }`. */
-export const THEME_KEY = 'dash:theme';
-
 export type ChartKind = 'line' | 'area' | 'bar' | 'spark';
 export type Point = [t: number, v: number | null];
 export interface ChartSeries { label: string; points: Point[] }

@@ -209,7 +209,7 @@ describe('routes', () => {
     const { host, router, db } = setup();
     const t = createTimer(db, 'u1', { label: 'mine', durationSec: 60 }, START);
     const res = await router.call('DELETE', `/timers/${t.id}`, { level: 'edit' });
-    expect(res.status).toBe(200); // the real router turns undefined into 204
+    expect(res.status).toBe(204); // the mock router answers 204 for undefined, like the real one
     expect(res.body).toBeUndefined();
     expect(listTimers(db, 'u1', START)).toEqual([]);
     expect(host.pushed.map((p) => p.instanceId).sort()).toEqual(['i1', 'i3']);

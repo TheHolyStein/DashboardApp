@@ -71,6 +71,8 @@ function wrapDb(db: Database.Database): ModuleDb {
   };
 }
 
+const sqliteOf = new WeakMap<object, Database.Database>();
+
 export function createMockHost(manifest: ModuleManifest, opts: { now?: Date } = {}): MockHost {
   let nowMs = (opts.now ?? new Date('2026-01-01T12:00:00.000Z')).getTime();
   let config: unknown = {};
@@ -191,23 +193,26 @@ export function createMockHost(manifest: ModuleManifest, opts: { now?: Date } = 
       users = u;
     },
   };
+  sqliteOf.set(host, sqlite);
   return host;
 }
 
-/** Runs the module's migrations (in id order) against the mock host's in-memory database. */
+/** Runs the module's migrations (in id order) against the mock host's in-memory database, with `exec` like the real runner (several statements per migration). */
 export function applyMigrations(host: MockHost, migrations: Migration[]): void {
+  const sqlite = sqliteOf.get(host);
+  if (!sqlite) throw new Error('applyMigrations needs a host from createMockHost');
   for (const m of [...migrations].sort((a, b) => a.id - b.id)) {
-    host.store.db.run(m.up);
+    sqlite.exec(m.up);
   }
 }
 
 type Level = 'view' | 'edit';
-type Handler = (req: RouteRequest) => Promise<unknown>;
+type Handler = (req: RouteRequest<any, any>) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any -- routes are registered with their own B/Q
 interface RegisteredRoute {
   method: string;
   path: string;
   level: Level;
-  opts: RouteOptions;
+  opts: RouteOptions<any, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- see Handler
   handler: Handler;
 }
 
@@ -242,8 +247,8 @@ export function createMockRouter(server: ModuleServer, host: MockHost): MockRout
   const registered: RegisteredRoute[] = [];
   const add =
     (method: string) =>
-    (path: string, opts: RouteOptions, handler: Handler): void => {
-      registered.push({ method, path, level: opts.level, opts, handler });
+    <B = unknown, Q = unknown>(path: string, opts: RouteOptions<B, Q>, handler: (req: RouteRequest<B, Q>) => unknown): void => {
+      registered.push({ method, path, level: opts.level, opts, handler: handler as Handler });
     };
   const router: ModuleRouter = {
     get: add('GET'),
@@ -286,7 +291,7 @@ export function createMockRouter(server: ModuleServer, host: MockHost): MockRout
         if (!parsed.success) return { status: 422, body: errorBody('invalid', 'invalid query', parsed.error.issues) };
         query = parsed.data;
       }
-      const request: RouteRequest = {
+      const request: RouteRequest<unknown, unknown> = {
         user: { id: 'u1', name: 'Test', role: 'member', ...req.user },
         level: req.level,
         params,
@@ -296,7 +301,9 @@ export function createMockRouter(server: ModuleServer, host: MockHost): MockRout
         raw: null,
       };
       try {
-        return { status: 200, body: await route.handler(request) };
+        const out = await route.handler(request);
+        // Like the real router: a handler returning undefined answers 204 with no body.
+        return out === undefined ? { status: 204, body: undefined } : { status: 200, body: out };
       } catch (e) {
         if (e instanceof DashError) return { status: HTTP_STATUS[e.code], body: errorBody(e.code, e.message, e.details) };
         return { status: 500, body: errorBody('internal', e instanceof Error ? e.message : 'internal error') };

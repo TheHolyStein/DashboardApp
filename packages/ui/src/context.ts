@@ -1,10 +1,10 @@
-import type { Translate } from '@dash/contract';
+import { ICONS_CONTEXT_KEY, T_CONTEXT_KEY, type Translate } from '@dash/contract';
 import { getContext } from 'svelte';
 
 /** Svelte context key under which the shell provides the `t` function. */
-export const T_KEY = 'dash:t';
+export const T_KEY = T_CONTEXT_KEY;
 /** Svelte context key for the icon source: `(name) => svg string | undefined`. */
-export const ICONS_KEY = 'dash:icons';
+export const ICONS_KEY = ICONS_CONTEXT_KEY;
 
 export type IconSource = (name: string) => string | undefined;
 

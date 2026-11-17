@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { DashError } from '@dash/contract';
+import { defineServer } from '../src/index.js';
 import { applyMigrations, createMockHost, createMockRouter, loadFixture } from '../src/testing.js';
 import { goodServer } from './sample-module/good/server.js';
 import { goodManifest } from './sample-module/good/manifest.js';
@@ -93,6 +95,15 @@ describe('mock host', () => {
     expect(await host.instances()).toHaveLength(1);
   });
 
+  it('applyMigrations runs several statements per migration like the real runner', () => {
+    const host = createMockHost(goodManifest);
+    applyMigrations(host, [
+      { id: 1, up: 'CREATE TABLE m_sample_t (id INTEGER PRIMARY KEY, v TEXT); CREATE INDEX m_sample_t_v ON m_sample_t (v);' },
+    ]);
+    const idx = host.store.db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'm_sample_t_v'");
+    expect(idx).toHaveLength(1);
+  });
+
   it('applyMigrations creates tables in store.db', () => {
     const host = createMockHost(goodManifest);
     applyMigrations(host, [{ id: 1, up: 'CREATE TABLE m_sample_t (id INTEGER PRIMARY KEY, v TEXT)' }]);
@@ -118,6 +129,24 @@ describe('mock router', () => {
     expect((await router.call('GET', '/boom', { level: 'view' })).status).toBe(404);
     expect((await router.call('GET', '/crash', { level: 'view' })).status).toBe(500);
     expect((await router.call('GET', '/nope', { level: 'view' })).status).toBe(404);
+  });
+});
+
+describe('mock router: 204', () => {
+  it('a handler returning undefined answers 204 without a body; a value answers 200 (sync or async)', async () => {
+    const host = createMockHost(goodManifest);
+    const server = defineServer({
+      manifest: { ...goodManifest, jobs: [], subscribes: [] },
+      routes(r) {
+        r.delete('/x', { level: 'edit' }, () => undefined);
+        r.get('/sync', { level: 'view' }, () => ({ ok: true }));
+        r.post('/typed', { level: 'edit', body: z.object({ n: z.number() }) }, (req) => ({ double: req.body.n * 2 }));
+      },
+    });
+    const router = createMockRouter(server, host);
+    expect(await router.call('DELETE', '/x', { level: 'edit' })).toEqual({ status: 204, body: undefined });
+    expect(await router.call('GET', '/sync', { level: 'view' })).toEqual({ status: 200, body: { ok: true } });
+    expect(await router.call('POST', '/typed', { level: 'edit', body: { n: 4 } })).toEqual({ status: 200, body: { double: 8 } });
   });
 });
 

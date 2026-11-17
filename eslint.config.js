@@ -72,6 +72,9 @@ export default tseslint.config(
       parserOptions: { parser: tseslint.parser, extraFileExtensions: ['.svelte'] },
       globals: { ...globals.browser },
     },
+    // The base rule reports parameter names inside function type signatures; the typescript-eslint rule knows types.
+    plugins: { '@typescript-eslint': tseslint.plugin },
+    rules: { 'no-unused-vars': 'off', '@typescript-eslint/no-unused-vars': 'error' },
   },
   {
     files: [...tsFiles, ...svelteFiles],

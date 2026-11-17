@@ -34,7 +34,7 @@ export const goodServer = defineServer({
   routes(r, host) {
     r.get('/items/:id', { level: 'view' }, (req) => Promise.resolve({ id: req.params['id'] }));
     r.post('/items', { level: 'edit', body: z.object({ title: z.string() }) }, (req) => {
-      const { title } = req.body as { title: string };
+      const { title } = req.body;
       return Promise.resolve(host.store.db.run('INSERT INTO m_sample_items (title) VALUES (?)', [title]));
     });
     r.post('/read', { level: 'view' }, () => Promise.resolve({ ok: true }));

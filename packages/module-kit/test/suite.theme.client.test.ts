@@ -9,6 +9,8 @@ import RafAtStatic from './sample-theme/negative/RafAtStatic.svelte';
 import Leaky from './sample-theme/negative/Leaky.svelte';
 import Tidy from './sample-theme/negative/Tidy.svelte';
 import Throws from './sample-theme/negative/Throws.svelte';
+import FaceNoText from './sample-theme/negative/FaceNoText.svelte';
+import FaceLabelled from './sample-theme/negative/FaceLabelled.svelte';
 
 const GOOD_DIR = path.join(import.meta.dirname, 'sample-theme', 'good');
 const BROKEN_TOKENS = path.join(import.meta.dirname, 'sample-theme', 'broken', 'tokens.css');
@@ -279,6 +281,23 @@ describe('theme contract cases', () => {
       const msg = await messageOf(withScene(() => Promise.resolve({ default: Throws })), GOOD_DIR, name);
       expect(msg).toContain('threw');
       expect(msg).toContain('night');
+    });
+  });
+
+  describe('clock faces expose the time as text', () => {
+    const name = 'each clock face renders at 2×1 and 6×4';
+    const withFace = (component: unknown): ThemeManifest => ({
+      ...good,
+      clockFaces: [{ id: 'x', name: 'X', component: () => Promise.resolve({ default: component as never }) }],
+    });
+    test('visible text with hour and minute passes (the good Digital face)', async () => {
+      expect(await messageOf(good, GOOD_DIR, name)).toBe('');
+    });
+    test('role="img" with an aria-label containing hour and minute passes', async () => {
+      expect(await messageOf(withFace(FaceLabelled), GOOD_DIR, name)).toBe('');
+    });
+    test('an image-like face without the time as text fails', async () => {
+      expect(await messageOf(withFace(FaceNoText), GOOD_DIR, name)).toContain('does not expose the time as text');
     });
   });
 });
