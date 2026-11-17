@@ -28,6 +28,7 @@ type TileComponent = Component<TileProps<any, any>>; // eslint-disable-line @typ
 interface MediaQueryLike {
   matches: boolean;
   addEventListener(type: 'change', fn: (e: { matches: boolean }) => void): void;
+  removeEventListener(type: 'change', fn: (e: { matches: boolean }) => void): void;
 }
 
 export interface ThemeEngineDeps {
@@ -111,9 +112,10 @@ export function createThemeEngine(deps: ThemeEngineDeps) {
   }
 
   // ---- mode: system preference ----
-  mq?.addEventListener('change', (e) => {
+  const onSystemChange = (e: { matches: boolean }): void => {
     systemDark = e.matches;
-  });
+  };
+  mq?.addEventListener('change', onSystemChange);
 
   // ---- mode: DOM attribute and the boundary timer (no polling) ----
   const stopEffects = $effect.root(() => {
@@ -305,6 +307,7 @@ export function createThemeEngine(deps: ThemeEngineDeps) {
     t,
     dispose(): void {
       stopEffects();
+      mq?.removeEventListener('change', onSystemChange);
     },
   };
 }

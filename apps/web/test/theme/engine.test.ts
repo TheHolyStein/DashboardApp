@@ -197,6 +197,15 @@ describe('mode', () => {
     expect(root.getAttribute('data-mode')).toBe('day');
   });
 
+  it('dispose() removes the matchMedia listener', () => {
+    const h = plain();
+    h.engine.setPolicy('system');
+    h.flush();
+    h.engine.dispose();
+    h.setDark(true);
+    expect(h.engine.mode).toBe('day');
+  });
+
   it('explicit day/night ignore the system', () => {
     const h = makeHarness({ themes: {}, dark: true });
     h.engine.setPolicy('day');

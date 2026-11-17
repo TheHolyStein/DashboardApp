@@ -13,6 +13,9 @@
     clockFace: (id?: string) => theme.clockFace(id),
     icon: iconOrUndefined,
     chart: () => theme.chart(),
+    get id() {
+      return theme.id;
+    },
     get mode() {
       return theme.mode;
     },

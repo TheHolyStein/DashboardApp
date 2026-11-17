@@ -91,7 +91,14 @@ export function makeHarness(o: HarnessOpts): Harness {
   const loadLog: string[] = [];
   const timers: Harness['timers'] = [];
   const listeners: Array<(e: { matches: boolean }) => void> = [];
-  const mq = { matches: o.dark ?? false, addEventListener: (_: 'change', fn: (e: { matches: boolean }) => void) => void listeners.push(fn) };
+  const mq = {
+    matches: o.dark ?? false,
+    addEventListener: (_: 'change', fn: (e: { matches: boolean }) => void) => void listeners.push(fn),
+    removeEventListener: (_: 'change', fn: (e: { matches: boolean }) => void) => {
+      const i = listeners.indexOf(fn);
+      if (i >= 0) listeners.splice(i, 1);
+    },
+  };
   const tokens: Record<string, string> = {};
 
   const registry: ThemeRegistry = Object.fromEntries(Object.entries(o.themes).map(([id, load]) => [id, { load }]));

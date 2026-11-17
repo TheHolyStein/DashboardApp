@@ -2,7 +2,7 @@ import type { Translate } from '@dash/contract';
 
 /** Replace `{var}` placeholders; unknown variables are left as written. */
 export function interpolate(text: string, vars?: Record<string, string | number>): string {
-  return vars ? text.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : text;
+  return vars ? text.replace(/\{(\w+)\}/g, (m, k: string) => (Object.hasOwn(vars, k) ? String(vars[k]) : m)) : text;
 }
 
 let localeStrings: Record<string, string> = {};
