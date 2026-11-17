@@ -10,7 +10,7 @@
   import type { Page } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
   import { ticker } from '../lib/ticker.svelte.js';
-  import { openSettings } from './SettingsDialog.svelte';
+  import { openSettings } from '../lib/ui-state.svelte.js';
 
   // `page` is part of the frame contract (ownership and edit rights for later tasks).
   let {

@@ -1,8 +1,3 @@
-<script module lang="ts">
-  /** Whether the catalog is open. Set by the edit bar. */
-  export const catalogUi = $state<{ open: boolean }>({ open: false });
-</script>
-
 <script lang="ts">
   import { tick } from 'svelte';
   import { DashError, InstanceDto } from '@dash/contract';
@@ -13,6 +8,7 @@
   import { pages } from '../lib/pages.svelte.js';
   import type { EditRegistry } from '../lib/schema-form.js';
   import { session } from '../lib/session.svelte.js';
+  import { catalogUi } from '../lib/ui-state.svelte.js';
 
   let { modules = clientModules }: { modules?: EditRegistry } = $props();
 

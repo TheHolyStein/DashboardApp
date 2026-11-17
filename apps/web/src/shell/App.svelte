@@ -1,30 +1,43 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { notifications } from '../lib/notifications.svelte.js';
+  import { offline } from '../lib/offline.svelte.js';
+  import { pages } from '../lib/pages.svelte.js';
+  import { loadIntensityOverride } from '../lib/prefs.js';
   import { session } from '../lib/session.svelte.js';
   import { t } from '../lib/i18n.js';
-  import { pages } from '../lib/pages.svelte.js';
-  import Catalog from './Catalog.svelte';
-  import DetailHost from './DetailHost.svelte';
-  import EditBar from './EditBar.svelte';
-  import Login from './Login.svelte';
-  import PageTabs from './PageTabs.svelte';
-  import Pages from './Pages.svelte';
-  import SettingsDialog from './SettingsDialog.svelte';
+  import ThemeRoot from '../theme/ThemeRoot.svelte';
+  import { setUserIntensityOverride } from '../theme/intensity.js';
+  import LoginThemed from './LoginThemed.svelte';
+  import Shell from './Shell.svelte';
 
   let failed = $state(false);
 
-  // Load pages once signed in; drop them (and unsent saves) on sign-out.
+  // Load pages and notifications once signed in; drop them (and unsent saves, stored offline state) on sign-out.
+  // While showing stored state offline nothing is requested; leaving that state (the session came back) loads them.
   $effect(() => {
     const status = session.status;
-    // untrack: the store reads and writes its own state; only the session status may trigger this.
+    const restored = offline.restored;
+    // untrack: the stores read and write their own state; only the session status and the offline flag may trigger this.
     untrack(() => {
-      if (status === 'signedIn') void pages.load();
-      else if (status === 'signedOut') pages.clear();
+      if (status === 'signedIn') {
+        if (restored) return;
+        void pages.load();
+        notifications.start();
+        offline.start();
+      } else if (status === 'signedOut') {
+        pages.clear();
+        notifications.clear();
+        offline.clear();
+      }
     });
   });
 
   onMount(() => {
+    setUserIntensityOverride(loadIntensityOverride());
     session.refresh().catch(() => {
+      // Cannot reach the server: with a stored layout, show it (stale) and keep retrying quietly.
+      if (offline.restore()) return;
       failed = true;
       session.clear();
     });
@@ -34,25 +47,13 @@
 {#if session.status === 'loading'}
   <p class="status" role="status">{t('shell.loading', 'Loading…')}</p>
 {:else if session.status === 'signedOut'}
-  <Login {failed} />
+  <LoginThemed {failed} />
 {:else if session.me}
-  <!-- Boundary for later tasks: a top bar goes above PageTabs. -->
-  <main class="signed-in" data-region="shell-content">
-    <p>{t('shell.signedInAs', 'Signed in as {name}', { name: session.me.name })}</p>
-    <button type="button" onclick={() => void session.logout()}>{t('shell.signOut', 'Sign out')}</button>
-    <PageTabs />
-    <EditBar />
-    <Pages />
-    <DetailHost />
-    <SettingsDialog />
-    <Catalog />
-  </main>
+  <ThemeRoot>
+    <Shell />
+  </ThemeRoot>
 {/if}
 
 <style>
-  .status, .signed-in { padding: 1rem; }
-  button {
-    font: inherit; padding: 0.5rem 1rem; color: var(--db-fg, #15181d); background: var(--db-surface, #fff);
-    border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); cursor: pointer;
-  }
+  .status { padding: 1rem; }
 </style>

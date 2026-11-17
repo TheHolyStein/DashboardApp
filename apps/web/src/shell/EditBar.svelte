@@ -3,7 +3,7 @@
   import { t } from '../lib/i18n.js';
   import { pages } from '../lib/pages.svelte.js';
   import { session } from '../lib/session.svelte.js';
-  import { catalogUi } from './Catalog.svelte';
+  import { catalogUi } from '../lib/ui-state.svelte.js';
 
   const owned = $derived(!!pages.current && pages.current.ownerId === session.me?.id);
 
@@ -17,7 +17,7 @@
   <div class="bar" role="toolbar" aria-label={t('edit.toolbar', 'Page editing')}>
     {#if pages.editing}
       <Button variant="primary" data-edit onclick={() => (catalogUi.open = true)}>{t('edit.add', 'Add module')}</Button>
-      <Button onclick={() => pages.setEditing(false)}>{t('edit.done', 'Done')}</Button>
+      <Button data-focus-fallback onclick={() => pages.setEditing(false)}>{t('edit.done', 'Done')}</Button>
     {:else}
       <Button aria-label={t('edit.start', 'Edit page')} onclick={() => pages.setEditing(true)}>✎</Button>
     {/if}

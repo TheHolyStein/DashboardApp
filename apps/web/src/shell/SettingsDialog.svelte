@@ -1,11 +1,3 @@
-<script module lang="ts">
-  /** Which instance's settings are open. Set by the tile's settings button. */
-  export const settingsUi = $state<{ instanceId: string | null }>({ instanceId: null });
-  export function openSettings(instanceId: string): void {
-    settingsUi.instanceId = instanceId;
-  }
-</script>
-
 <script lang="ts">
   import { untrack } from 'svelte';
   import { DashError, InstanceDto, type ModuleClient } from '@dash/contract';
@@ -13,8 +5,9 @@
   import { clientModules } from '../generated/modules.js';
   import { moduleApi, api } from '../lib/api.js';
   import { t } from '../lib/i18n.js';
+  import { settingsUi } from '../lib/ui-state.svelte.js';
   import { pages } from '../lib/pages.svelte.js';
-  import { coerce, describeSchema, fillForm, issuesToErrors, type EditRegistry, type FieldSpec } from '../lib/schema-form.js';
+  import { coerce, describeSchema, fillForm, getAt, hasField, issuesToErrors, secretPaths, setAt, type EditRegistry, type FieldSpec } from '../lib/schema-form.js';
   import SchemaForm from './SchemaForm.svelte';
 
   let { modules = clientModules }: { modules?: EditRegistry } = $props();
@@ -37,26 +30,6 @@
   let general = $state('');
   let saving = $state(false);
   let stored: Rec = {};
-
-  const secretPaths = (fs: FieldSpec[], prefix = ''): string[] =>
-    fs.flatMap((f) => {
-      const p = prefix ? `${prefix}.${f.key}` : f.key;
-      if (f.kind === 'string' && f.widget === 'secret') return [p];
-      if (f.kind === 'group') return secretPaths(f.fields, p);
-      return [];
-    });
-  const getAt = (o: unknown, path: string): unknown =>
-    path.split('.').reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Rec)[k] : undefined), o);
-  function setAt(o: Rec, path: string, v: unknown): void {
-    const keys = path.split('.');
-    let cur = o;
-    for (const k of keys.slice(0, -1)) {
-      const next = cur[k];
-      if (!next || typeof next !== 'object') cur[k] = {};
-      cur = cur[k] as Rec;
-    }
-    cur[keys[keys.length - 1] as string] = v;
-  }
 
   $effect(() => {
     const id = iid;
@@ -119,7 +92,8 @@
 
   function showIssues(issues: readonly { path: readonly PropertyKey[]; message: string }[]): void {
     errors = issuesToErrors(issues);
-    const loose = Object.entries(errors).filter(([k]) => k === '' || phase === 'custom');
+    // Issues that match no rendered field (root issues, unknown paths, anything in a custom form) go to the general line.
+    const loose = Object.entries(errors).filter(([k]) => k === '' || phase === 'custom' || !hasField(fields, k));
     general = loose.map(([k, m]) => (k ? `${k}: ${m}` : m)).join(' ');
   }
 

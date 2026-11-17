@@ -188,6 +188,34 @@ export function createPages(deps: PagesDeps) {
     mapPage(owner.id, (p) => ({ ...p, instances: p.instances.filter((i) => i.id !== instanceId) }));
   }
 
+  /** Take over a page's metadata (name, background, ...) after PATCH; its instances stay as they are. */
+  function replacePage(page: Page): void {
+    mapPage(page.id, (p) => ({ ...page, instances: p.instances }));
+  }
+  /** Append a page after POST and show it. */
+  function addPage(page: Page): void {
+    if (list.some((p) => p.id === page.id)) return;
+    list = [...list, page];
+    publishModules();
+    select(page.id);
+  }
+  /** Drop a page after DELETE; the current page falls back to the first one. */
+  function removePage(id: string): void {
+    const entry = pending.get(id);
+    if (entry) deps.clearTimeout(entry.timer);
+    pending.delete(id);
+    list = list.filter((p) => p.id !== id);
+    settle();
+    publishModules();
+  }
+  /** Offline start: show a stored layout without a request. */
+  function restore(stored: Page[]): void {
+    list = stored;
+    status = 'ready';
+    settle();
+    publishModules();
+  }
+
   function onPopState(): void {
     currentId = idFromUrl();
     settle();
@@ -249,6 +277,10 @@ export function createPages(deps: PagesDeps) {
     addInstance,
     replaceInstance,
     removeInstance,
+    replacePage,
+    addPage,
+    removePage,
+    restore,
     setEditing(on: boolean): void {
       editing = on;
       if (!on) for (const id of [...deferred]) settleDeferred(id);

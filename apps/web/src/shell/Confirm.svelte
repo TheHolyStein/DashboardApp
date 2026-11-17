@@ -23,6 +23,12 @@
     return () => {
       if (el.open) el.close();
       if (previous?.isConnected) previous.focus();
+      // The opener is gone after a confirmed delete: once the DOM settled, move focus to a stable target.
+      queueMicrotask(() => {
+        const a = document.activeElement;
+        if (a && a !== document.body && a.isConnected && !el.contains(a)) return;
+        document.querySelector<HTMLElement>('[data-focus-fallback]')?.focus();
+      });
     };
   });
 </script>

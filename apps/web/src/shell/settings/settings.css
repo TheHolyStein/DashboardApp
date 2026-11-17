@@ -1,0 +1,24 @@
+/* Shared look of the settings sections (namespaced; tokens only). */
+.st { display: grid; gap: 1rem; }
+.st h3 { margin: 0.5rem 0 0; font-size: 1.05rem; }
+.st p { margin: 0; }
+.st .muted { color: var(--db-muted, #4a5260); font-size: 0.9em; }
+.st .ok { color: var(--db-ok, #1b6e3c); }
+.st .err { color: var(--db-danger, #b42318); }
+.st form, .st .stack { display: grid; gap: 0.6rem; max-width: 28rem; }
+.st label { display: grid; gap: 0.2rem; font-weight: 600; }
+.st input, .st select {
+  font: inherit; padding: 0.45rem 0.6rem; color: var(--db-fg, #15181d); background: var(--db-surface, #fff);
+  border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px);
+}
+.st input[type='radio'], .st input[type='checkbox'] { padding: 0; }
+.st fieldset { display: grid; gap: 0.4rem; margin: 0; padding: 0.5rem 0.75rem; border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); }
+.st fieldset label { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; }
+.st .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.st ul.plain { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.5rem; }
+.st .card { display: grid; gap: 0.4rem; padding: 0.6rem 0.75rem; border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); }
+.st code, .st .mono { font-family: ui-monospace, monospace; overflow-wrap: anywhere; user-select: all; }
+.st .scroll { overflow-x: auto; }
+.st table { border-collapse: collapse; }
+.st th, .st td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: var(--db-border, 1px solid #c9ced6); white-space: nowrap; }
+.st th:first-child, .st td:first-child { position: sticky; left: 0; background: var(--db-surface, #fff); }

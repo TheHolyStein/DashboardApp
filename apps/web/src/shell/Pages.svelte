@@ -68,7 +68,7 @@
   });
 </script>
 
-<div class="pages" bind:this={container}>
+<div class="pages" bind:this={container} data-region="pages" data-focus-fallback tabindex="-1">
   {#if pages.status === 'loading' || pages.status === 'idle'}
     <p class="state" role="status">{t('pages.loading', 'Loading pages…')}</p>
   {:else if pages.status === 'error' && !pages.current}

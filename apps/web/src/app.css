@@ -14,8 +14,10 @@
 }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+/* The page colour sits on html so that the theme's background layer (z-index -1) shows through the transparent body. */
+html { background: var(--db-bg); }
 body {
-  background: var(--db-bg);
+  background: transparent;
   color: var(--db-fg);
   font-family: var(--db-font-body);
   line-height: 1.4;

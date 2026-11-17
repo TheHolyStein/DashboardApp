@@ -262,3 +262,47 @@ export function issuesToErrors(issues: readonly { path: readonly PropertyKey[]; 
   }
   return out;
 }
+
+/** Whether a dotted issue path (`a.b`, `list.2.name`) addresses a field the generated form renders. */
+export function hasField(fields: readonly FieldSpec[], path: string): boolean {
+  const segs = path.split('.').filter((s) => s !== '');
+  if (segs.length === 0) return false;
+  const walk = (specs: readonly FieldSpec[], rest: string[]): boolean => {
+    const [head, ...tail] = rest;
+    const f = specs.find((s) => s.key === head);
+    if (!f) return false;
+    if (tail.length === 0) return true;
+    if (f.kind === 'group') return walk(f.fields, tail);
+    if (f.kind === 'list') {
+      const [idx, ...after] = tail;
+      if (idx === undefined || !/^\d+$/.test(idx)) return false;
+      if (after.length === 0) return true;
+      return f.of.kind === 'group' ? walk(f.of.fields, after) : false;
+    }
+    return false;
+  };
+  return walk(fields, segs);
+}
+
+/** Dotted paths of the `secret` string fields (nested in groups). */
+export function secretPaths(fs: readonly FieldSpec[], prefix = ''): string[] {
+  return fs.flatMap((f) => {
+    const p = prefix ? `${prefix}.${f.key}` : f.key;
+    if (f.kind === 'string' && f.widget === 'secret') return [p];
+    if (f.kind === 'group') return secretPaths(f.fields, p);
+    return [];
+  });
+}
+export function getAt(o: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined), o);
+}
+export function setAt(o: Record<string, unknown>, path: string, v: unknown): void {
+  const keys = path.split('.');
+  let cur = o;
+  for (const k of keys.slice(0, -1)) {
+    const next = cur[k];
+    if (!next || typeof next !== 'object') cur[k] = {};
+    cur = cur[k] as Record<string, unknown>;
+  }
+  cur[keys[keys.length - 1] as string] = v;
+}

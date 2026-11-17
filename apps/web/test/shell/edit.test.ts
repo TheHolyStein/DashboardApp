@@ -5,8 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pages } from '../../src/lib/pages.svelte.js';
 import type { EditRegistry } from '../../src/lib/schema-form.js';
-import { catalogUi } from '../../src/shell/Catalog.svelte';
-import { settingsUi } from '../../src/shell/SettingsDialog.svelte';
+import { catalogUi, settingsUi } from '../../src/lib/ui-state.svelte.js';
 import { editRegistry } from '../fixtures/editRegistry.js';
 import EditShell from '../fixtures/EditShell.svelte';
 import { server } from '../setup.js';
@@ -43,10 +42,8 @@ const tileSettings = async (instanceId: string) => {
 beforeEach(() => {
   pages.clear();
   history.replaceState(null, '', '/');
-  /* eslint-disable @typescript-eslint/no-unsafe-member-access -- module-script exports of .svelte files are not resolved by typed lint */
   settingsUi.instanceId = null;
   catalogUi.open = false;
-  /* eslint-enable @typescript-eslint/no-unsafe-member-access */
 });
 afterEach(() => {
   pages.clear();

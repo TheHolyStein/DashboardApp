@@ -35,7 +35,7 @@ describe('login', () => {
     await user.type(code, '123456');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
-    expect(await screen.findByText('Signed in as Alice')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Account menu for Alice' })).toBeTruthy();
     expect(bodies).toEqual([
       { name: 'alice', password: 'pw' },
       { name: 'alice', password: 'pw', totp: '123456' },
@@ -121,7 +121,7 @@ describe('login', () => {
     await user.click(btn);
     await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(true));
     release();
-    expect(await screen.findByText('Signed in as Alice')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Account menu for Alice' })).toBeTruthy();
   });
 
   it('sign out returns to the login form', async () => {
@@ -134,6 +134,7 @@ describe('login', () => {
     );
     const user = userEvent.setup();
     render(App);
+    await user.click(await screen.findByRole('button', { name: 'Account menu for Alice' }));
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(await screen.findByLabelText('Password')).toBeTruthy();
   });
