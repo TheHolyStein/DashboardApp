@@ -3,7 +3,13 @@
 
   // The shell opens the detail view when the tile frame (or its title) is activated; no open button needed.
   // Set `detail: false` in client/index.ts for a tile without a detail view.
-  let { data, stale, level, t }: TileProps<{ value: number; label: string }> = $props();
+  let { data, updatedAt, stale, level, t, locale, timeZone }: TileProps<{ value: number; label: string }> = $props();
+
+  // Format with the user's saved locale and time zone from props; never the browser's or the server's default.
+  const number = $derived(new Intl.NumberFormat(locale));
+  const time = $derived(
+    updatedAt ? new Intl.DateTimeFormat(locale, { timeStyle: 'short', timeZone }).format(new Date(updatedAt)) : '',
+  );
 </script>
 
 <section class:stale>
@@ -11,7 +17,8 @@
   {#if data}
     <p>{data.label}</p>
     <!-- Formatted numbers, times and dates are data, not words: mark them with data-value instead of wrapping in t(). -->
-    <p><span data-value>{data.value}</span></p>
+    <p><span data-value>{number.format(data.value)}</span></p>
+    {#if time}<p><span data-value>{time}</span></p>{/if}
   {:else}
     <p>{t('m.__ID__.loading', 'Loading')}</p>
   {/if}

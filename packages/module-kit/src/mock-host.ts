@@ -206,6 +206,21 @@ export function applyMigrations(host: MockHost, migrations: Migration[]): void {
   }
 }
 
+/**
+ * A mock host for `server`, with its migrations applied and its `setup` hook run, like the real loader does.
+ * Use it in route/job tests instead of `createMockHost` so state created in `setup` exists.
+ */
+export async function createMockHostWithSetup(
+  server: ModuleServer,
+  opts: { now?: Date; /** Runs after migrations and before `setup`: seed config, instances, users or HTTP responses here. */ prepare?: (host: MockHost) => void } = {},
+): Promise<MockHost> {
+  const host = createMockHost(server.manifest, opts.now ? { now: opts.now } : {});
+  applyMigrations(host, server.migrations ?? []);
+  opts.prepare?.(host);
+  await server.setup?.(host);
+  return host;
+}
+
 type Level = 'view' | 'edit';
 type Handler = (req: RouteRequest<any, any>) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any -- routes are registered with their own B/Q
 interface RegisteredRoute {

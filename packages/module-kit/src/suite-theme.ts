@@ -600,6 +600,8 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
               size: { w: 4, h: 2 },
               mode,
               api: stubApi,
+              locale: 'de-DE',
+              timeZone: 'Asia/Kolkata',
               t: identityT,
               openDetail: () => undefined,
             };

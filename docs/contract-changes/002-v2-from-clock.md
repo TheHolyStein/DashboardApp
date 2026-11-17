@@ -103,3 +103,26 @@ Format per change: problem / change / who is affected / migration for existing c
 
 ### D1. Template
 - `tools/templates/module` now uses `m.<id>.*` keys, `newId`, `createSnapshotPusher`, typed bodies, a table-plus-index migration, `data-value`, `Button busy`/`serial`, and has a README section "Shared pages show the owner's data". The scaffolder fills a new `__TABLE_PREFIX__` placeholder (`m_<id with - as _>_`).
+
+## v2 completion (KC-3)
+
+Three additive completions made before any module beyond Clock exists. `CONTRACT_VERSION` stays 2.
+
+### E1. `locale` and `timeZone` props
+- Problem: modules had no access to the user's locale and time zone and formatted with the browser default.
+- Change: `TileProps`, `DetailProps` and `SettingsProps` gain required `locale: string` and `timeZone: string` (the user's `prefs.locale` / `prefs.timeZone`). `TileHost` and `DetailHost` pass them from the session, falling back to `navigator.language` / `Intl.DateTimeFormat().resolvedOptions().timeZone` only when the prefs are empty. The client contract suite renders with `de-DE` and `Asia/Kolkata`.
+- Affected: any code that builds `TileProps` / `DetailProps` by hand (tests).
+- Migration: use the props in every `Intl` call.
+
+### E2. `ModuleServer.setup` and `teardown`
+- Problem: per-host state (snapshot pusher, caches) had no safe place to be created.
+- Change: optional `setup?(host)` runs once per loaded, enabled module after migrations and before the first job, route or event handler; a throw or rejection marks the module failed. Optional `teardown?(host)` runs on server shutdown before the database closes (errors logged). `createMockHostWithSetup(server, { now?, prepare? })` in `@dash/module-kit/testing`; `runServerContractSuite` runs `setup` before jobs and routes.
+- Affected: modules that keep per-host state.
+- Migration: create the pusher in `setup`, hold it in a closure.
+
+### E3. `data-user` marker
+- Problem: user-provided text (titles, feed headlines) could only be passed through `data-value`, whose prose guard rejects sentences.
+- Change: text inside an element with `data-user` is exempt from the `t()` rule and the `data-value` prose guard in the client contract suite.
+- Affected: tiles showing user content.
+- Migration: wrap such text in `<span data-user>`.
+

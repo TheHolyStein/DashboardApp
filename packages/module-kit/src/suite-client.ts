@@ -12,6 +12,10 @@ export interface ClientSuiteOptions {
   detailFixture?: string;
 }
 
+/** Explicit, non-default values: a tile that ignores `locale` / `timeZone` (formats with the browser's or UTC) shows up as a wrong string. */
+export const SUITE_LOCALE = 'de-DE';
+export const SUITE_TIME_ZONE = 'Asia/Kolkata';
+
 const MARK_OPEN = '⟦';
 const MARK_CLOSE = '⟧';
 
@@ -46,7 +50,8 @@ const PROSE = /\p{L}{3,}\s+\p{L}{3,}/u;
 
 /**
  * Visible text nodes. Text inside a `data-value` element is data (formatted numbers, times, dates) and is skipped,
- * unless it reads as prose: that is reported separately as an offender by the caller.
+ * unless it reads as prose: that is reported separately as an offender by the caller. Text inside a `data-user`
+ * element is user-provided content (titles, labels the user typed, feed headlines) and is exempt from both rules.
  */
 function textNodes(root: Node): Array<{ text: string; dataValue: boolean }> {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -54,6 +59,7 @@ function textNodes(root: Node): Array<{ text: string; dataValue: boolean }> {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n.textContent?.trim();
     if (!text) continue;
+    if (n.parentElement?.closest('[data-user]') != null) continue;
     out.push({ text, dataValue: n.parentElement?.closest('[data-value]') != null });
   }
   return out;
@@ -76,6 +82,8 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     mode: 'day',
     api: stubApi,
     t: identityT,
+    locale: SUITE_LOCALE,
+    timeZone: SUITE_TIME_ZONE,
     openDetail: () => undefined,
     ...over,
   });
@@ -88,6 +96,8 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     mode: 'day',
     api: stubApi,
     t: identityT,
+    locale: SUITE_LOCALE,
+    timeZone: SUITE_TIME_ZONE,
     params: {},
     close: () => undefined,
     ...over,

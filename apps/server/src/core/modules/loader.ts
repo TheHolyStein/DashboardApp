@@ -75,6 +75,14 @@ export async function loadModules(
       db.prepare('INSERT OR IGNORE INTO module_state (module_id) VALUES (?)').run(id);
       const enabled = db.prepare('SELECT enabled FROM module_state WHERE module_id = ?').pluck().get(id) !== 0;
       const host = deps.makeHost(server);
+      if (enabled && server.setup) {
+        try {
+          await server.setup(host);
+        } catch (err) {
+          out.push(failedModule(id, server, `setup failed: ${err instanceof Error ? err.message : String(err)}`));
+          continue;
+        }
+      }
       seen.add(id);
       out.push({ id, server, host, enabled });
     } catch (err) {
@@ -82,4 +90,16 @@ export async function loadModules(
     }
   }
   return out;
+}
+
+/** Calls every loaded module's `teardown` (errors logged, never thrown). Call on shutdown before the database closes. */
+export async function teardownModules(modules: readonly LoadedModule[], logger: LoggerLike): Promise<void> {
+  for (const mod of modules) {
+    if (mod.failed !== undefined || !mod.server.teardown) continue;
+    try {
+      await mod.server.teardown(mod.host);
+    } catch (err) {
+      logger.error({ module: mod.id, err: err instanceof Error ? err.message : String(err) }, 'module teardown failed');
+    }
+  }
 }

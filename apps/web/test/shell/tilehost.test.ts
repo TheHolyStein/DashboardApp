@@ -136,6 +136,25 @@ describe('TileHost', () => {
     await waitFor(() => expect(document.querySelector('[data-testid="mod-icon"]')).toBeTruthy());
   });
 
+  it('passes the saved locale and time zone, falling back to the browser only when prefs are empty', async () => {
+    const { modules } = fakeRegistry();
+    signIn({
+      grants: { good: 'view', boom: 'view' },
+      prefs: { theme: 'default', modePolicy: 'system', locale: 'de-DE', timeZone: 'Asia/Kolkata' },
+    });
+    const first = renderHost(good, modules);
+    expect((await screen.findByTestId('format')).textContent).toBe('de-DE|Asia/Kolkata');
+    first.unmount();
+    signIn({
+      grants: { good: 'view', boom: 'view' },
+      prefs: { theme: 'default', modePolicy: 'system', locale: '', timeZone: '' },
+    });
+    renderHost(good, modules);
+    expect((await screen.findByTestId('format')).textContent).toBe(
+      `${navigator.language}|${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+    );
+  });
+
   it('mode defaults to day without a theme', async () => {
     const { modules } = fakeRegistry();
     renderHost(good, modules);

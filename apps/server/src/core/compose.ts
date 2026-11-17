@@ -13,7 +13,7 @@ import { createBus, wireModuleSubscriptions } from './bus.js';
 import { createHttp, purgeExpiredCache } from './http/client.js';
 import { createInstanceReader, createModuleState } from './instances.js';
 import { createHost } from './modules/host.js';
-import { loadModules } from './modules/loader.js';
+import { loadModules, teardownModules } from './modules/loader.js';
 import type { LoadedModule, LoggerLike, Scheduler } from './modules/deps.js';
 import { createNotifications, purgeOldNotifications, type NotificationsService } from './notifications.js';
 import { ensureStarterPage } from './pages.js';
@@ -46,6 +46,8 @@ export interface Composed {
   appDeps: Pick<AppDeps, 'auth' | 'modules' | 'stream' | 'scheduler' | 'pagesApi'>;
   /** One housekeeping pass: every purge isolated in try/catch and logged. */
   housekeeping(): void;
+  /** Runs every module's `teardown`; call on shutdown before the database closes. */
+  teardown(): Promise<void>;
 }
 
 /** Module-admin convention: the string array at key `lanHosts` of a module's stored config (else empty). */
@@ -175,5 +177,6 @@ export async function compose(deps: ComposeDeps): Promise<Composed> {
       pagesApi: { scheduler, stream, snapshots, notifications, audit, now, logger },
     },
     housekeeping,
+    teardown: () => teardownModules(modules, logger),
   };
 }

@@ -24,6 +24,10 @@ export interface TileProps<D = unknown, S = unknown> {
   mode: Mode;
   api: ModuleApi;
   t: Translate;
+  /** The signed-in user's saved locale (BCP 47, e.g. `de-DE`). Pass it to every `Intl`/`toLocale*` call. */
+  locale: string;
+  /** The signed-in user's saved IANA time zone (e.g. `Asia/Kolkata`). Pass it as `timeZone` when formatting times and dates. */
+  timeZone: string;
   openDetail: (params?: Record<string, string>) => void;
 }
 
@@ -37,6 +41,8 @@ export interface SettingsProps<S = unknown> {
   onChange: (v: S) => void;
   api: ModuleApi;
   t: Translate;
+  locale: string;
+  timeZone: string;
 }
 
 export interface ModuleClient {

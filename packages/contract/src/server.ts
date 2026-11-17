@@ -62,6 +62,14 @@ export interface Migration {
 export interface ModuleServer<S = unknown> {
   manifest: ModuleManifest;
   migrations?: Migration[];
+  /**
+   * Called once per loaded, enabled module, after migrations and before the first job, route or event handler runs.
+   * Keep per-host state (snapshot pusher, caches) in a closure created here, never at module scope.
+   * A throw or rejection marks the module failed.
+   */
+  setup?: (host: HostServices) => void | Promise<void>;
+  /** Called on server shutdown, before the database closes. Errors are logged and ignored. */
+  teardown?: (host: HostServices) => void | Promise<void>;
   // keys must equal manifest.jobs[].name
   jobs?: Record<string, (ctx: JobContext<S>) => Promise<void>>;
   routes?: (r: ModuleRouter, host: HostServices) => void;

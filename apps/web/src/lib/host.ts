@@ -40,6 +40,15 @@ export function lookupIcon(theme: ThemeSeam | undefined, moduleIcons: Record<str
   return theme?.icon?.(name) ?? (Object.hasOwn(moduleIcons, name) ? moduleIcons[name] : undefined);
 }
 
+/** The user's saved locale and time zone; the browser's only when the saved preference is empty. */
+export function userFormat(): { locale: string; timeZone: string } {
+  const prefs = session.me?.prefs;
+  return {
+    locale: prefs?.locale || navigator.language,
+    timeZone: prefs?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+}
+
 /** The part of Tile/Detail props that is the same for both. */
 export function baseProps(instance: Instance, mode: Mode) {
   const snap = stream.snapshots[instance.id];
@@ -52,5 +61,6 @@ export function baseProps(instance: Instance, mode: Mode) {
     mode,
     api: moduleApi(instance.moduleId),
     t,
+    ...userFormat(),
   };
 }

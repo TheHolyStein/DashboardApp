@@ -11,6 +11,9 @@ import ThrowsAlways from './sample-module/negative/ThrowsAlways.svelte';
 import HardcodedWhenEmpty from './sample-module/negative/HardcodedWhenEmpty.svelte';
 import Substring from './sample-module/negative/Substring.svelte';
 import DataValue from './sample-module/negative/DataValue.svelte';
+import DataUser from './sample-module/negative/DataUser.svelte';
+import DataUserInDataValue from './sample-module/negative/DataUserInDataValue.svelte';
+import ExpectsSuiteLocale from './sample-module/negative/ExpectsSuiteLocale.svelte';
 import DataValueProse from './sample-module/negative/DataValueProse.svelte';
 
 const opts = {
@@ -72,5 +75,15 @@ describe('client contract cases fail for the matching fault', () => {
 
   test('all visible text goes through t(): a data-value span holding a formatted time passes', async () => {
     expect(await failedCases(withTile(DataValue))).not.toContain('all visible text goes through t()');
+  });
+
+  test('all visible text goes through t(): text inside data-user passes, the same text in data-value fails', async () => {
+    expect(await failedCases(withTile(DataUser))).not.toContain('all visible text goes through t()');
+    expect(await failedCases(withTile(DataUserInDataValue))).toContain('all visible text goes through t()');
+  });
+
+  test('the suite renders tiles and details with explicit locale and time zone (de-DE, Asia/Kolkata)', async () => {
+    expect(await failedCases(withTile(ExpectsSuiteLocale))).toEqual([]);
+    expect(await failedCases({ ...goodClient, Detail: ExpectsSuiteLocale })).toEqual([]);
   });
 });

@@ -37,6 +37,8 @@ function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps
     mode: 'day',
     api: {} as ModuleApi,
     t: identityT,
+    locale: 'en',
+    timeZone: 'UTC',
     openDetail: () => undefined,
     ...over,
   };
@@ -266,6 +268,8 @@ describe('Detail', () => {
     mode: 'day' as const,
     api: emptyApi(),
     t: identityT,
+    locale: 'en',
+    timeZone: 'UTC',
     params: {},
     close: () => undefined,
     ...over,

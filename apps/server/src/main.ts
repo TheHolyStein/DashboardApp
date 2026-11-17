@@ -90,7 +90,11 @@ export async function start(env: NodeJS.ProcessEnv = process.env, opts: StartOpt
           await running.scheduler.stop();
           await live.close(); // closes streams (preClose hook) and stops accepting
         } finally {
-          db.close();
+          try {
+            await running.teardown();
+          } finally {
+            db.close();
+          }
         }
       })());
     return { app, db, services, address: `http://${config.host}:${port}`, close };

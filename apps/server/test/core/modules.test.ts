@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/require-await */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { BinaryResponse, type ModuleServer } from '@dash/contract';
-import { ROOT_MOUNT_ALLOW } from '../../src/core/modules/loader.ts';
-import { makeModuleEnv, serverFor, type ModuleEnv } from './module-env.ts';
+import { ROOT_MOUNT_ALLOW, teardownModules } from '../../src/core/modules/loader.ts';
+import { makeModuleEnv, serverFor, silentLogger, type ModuleEnv } from './module-env.ts';
 
 const envs: ModuleEnv[] = [];
 afterEach(async () => {
@@ -84,6 +84,42 @@ describe('module loader', () => {
     expect(e.modules[0]!.failed).toBe('boom');
     expect(e.modules[1]!.enabled).toBe(true);
     expect(e.db.prepare('SELECT enabled FROM module_state WHERE module_id = ?').pluck().get('ok')).toBe(1);
+  });
+});
+
+describe('module setup and teardown', () => {
+  it('setup runs once per enabled module, before routes serve; teardown runs on teardownModules', async () => {
+    const order: string[] = [];
+    const setup = vi.fn(async () => void order.push('setup'));
+    const teardown = vi.fn(async () => void order.push('teardown'));
+    const mod = serverFor('hooked', (r) => r.get('/hello', { level: 'view' }, async () => (order.push('route'), { ok: true })), { setup, teardown });
+    const e = await env([mod]);
+    expect(setup).toHaveBeenCalledTimes(1);
+    expect(setup).toHaveBeenCalledWith(e.modules[0]!.host);
+    await e.app.inject({ url: '/api/m/hooked/hello', headers: as('alice') });
+    await teardownModules(e.modules, silentLogger);
+    expect(teardown).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['setup', 'route', 'teardown']);
+  });
+
+  it('a throwing setup marks only that module failed and teardown skips it', async () => {
+    const teardown = vi.fn(async () => {});
+    const bad = serverFor('badsetup', undefined, { setup: async () => { throw new Error('nope'); }, teardown });
+    const e = await env([bad, demo('fine')]);
+    expect(e.modules[0]!.failed).toMatch(/setup failed: nope/);
+    expect(e.modules[1]!.failed).toBeUndefined();
+    await teardownModules(e.modules, silentLogger);
+    expect(teardown).not.toHaveBeenCalled();
+  });
+
+  it('a throwing teardown is logged and does not stop the others', async () => {
+    const second = vi.fn(async () => {});
+    const e = await env([
+      serverFor('t1', undefined, { teardown: async () => { throw new Error('x'); } }),
+      serverFor('t2', undefined, { teardown: second }),
+    ]);
+    await expect(teardownModules(e.modules, silentLogger)).resolves.toBeUndefined();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });
 

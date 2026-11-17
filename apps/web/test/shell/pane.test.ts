@@ -1,5 +1,5 @@
 import '../fixtures/dialog.js';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -55,6 +55,17 @@ describe('detail pane', () => {
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(dialog()).toBeNull());
     expect(document.activeElement).toBe(opener);
+  });
+
+  it('the detail receives the saved locale and time zone', async () => {
+    await setup();
+    signIn({
+      grants: { good: 'view', boom: 'view' },
+      prefs: { theme: 'default', modePolicy: 'system', locale: 'de-DE', timeZone: 'Asia/Kolkata' },
+    });
+    detail.open('i1');
+    const pane = await screen.findByRole('dialog');
+    expect((await within(pane).findByTestId('format')).textContent).toBe('de-DE|Asia/Kolkata');
   });
 
   it('Back button closes pane', async () => {

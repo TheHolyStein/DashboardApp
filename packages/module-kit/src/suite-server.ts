@@ -7,7 +7,7 @@ import {
   type ModuleInstance,
   type ModuleServer,
 } from '@dash/contract';
-import { applyMigrations, createMockHost, createMockRouter, type MockHost } from './mock-host.js';
+import { createMockHostWithSetup, createMockRouter, type MockHost } from './mock-host.js';
 
 export interface ServerSuiteOptions {
   moduleDir: string;
@@ -81,22 +81,23 @@ function describeError(e: unknown): string {
   return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
 }
 
-function freshHost(server: ModuleServer): MockHost {
+function freshHost(server: ModuleServer): Promise<MockHost> {
   const { manifest } = server;
-  const host = createMockHost(manifest);
-  applyMigrations(host, server.migrations ?? []);
-  const config = manifest.config.safeParse({});
-  host.setConfig(config.success ? config.data : {});
-  const settings = manifest.settings.safeParse({});
-  const instance: ModuleInstance = {
-    id: '00000000-0000-7000-8000-000000000001',
-    ownerId: 'u1',
-    pageId: 'p1',
-    settings: settings.success ? settings.data : {},
-  };
-  host.setInstances([instance]);
-  host.setUsers([{ id: 'u1', name: 'Test', handle: 'test' }]);
-  return host;
+  return createMockHostWithSetup(server, {
+    prepare: (host) => {
+      const config = manifest.config.safeParse({});
+      host.setConfig(config.success ? config.data : {});
+      const settings = manifest.settings.safeParse({});
+      const instance: ModuleInstance = {
+        id: '00000000-0000-7000-8000-000000000001',
+        ownerId: 'u1',
+        pageId: 'p1',
+        settings: settings.success ? settings.data : {},
+      };
+      host.setInstances([instance]);
+      host.setUsers([{ id: 'u1', name: 'Test', handle: 'test' }]);
+    },
+  });
 }
 
 /** One entry per (job, instance) pair; module-scoped jobs run once with a null instance. */
@@ -171,8 +172,8 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
     },
     {
       name: 'every route declares a level',
-      run: () => {
-        const { routes } = createMockRouter(server, freshHost(server));
+      run: async () => {
+        const { routes } = createMockRouter(server, await freshHost(server));
         const problems: string[] = [];
         for (const r of routes) {
           const level: unknown = r.level;
@@ -182,13 +183,12 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
           }
         }
         if (problems.length > 0) fail(problems.join('; '));
-        return Promise.resolve();
       },
     },
     {
       name: 'view level cannot call edit routes',
       run: async () => {
-        const router = createMockRouter(server, freshHost(server));
+        const router = createMockRouter(server, await freshHost(server));
         const problems: string[] = [];
         for (const r of router.routes) {
           const mustBeDenied = r.level === 'edit' || (r.method !== 'GET' && !viewWrites.has(routeKey(r)));
@@ -210,7 +210,7 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
         ];
         const problems: string[] = [];
         for (const sc of scenarios) {
-          const host = freshHost(server);
+          const host = await freshHost(server);
           sc.setup(host);
           for (const target of await jobTargets(server, host)) {
             const label = `job "${target.name}" ${sc.label}`;
@@ -240,7 +240,7 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
     {
       name: 'job publishes only declared events',
       run: async () => {
-        const host = freshHost(server);
+        const host = await freshHost(server);
         opts.happyHttp?.(host);
         const problems: string[] = [];
         for (const target of await jobTargets(server, host)) {
@@ -265,7 +265,7 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
     {
       name: 'snapshots contain no secrets',
       run: async () => {
-        const host = freshHost(server);
+        const host = await freshHost(server);
         const issued: string[] = [];
         const store = new Map<string, string>();
         // Any secret the module asks for yields a fresh sentinel.
@@ -291,7 +291,7 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
       name: 'job honors abort signal',
       run: async () => {
         const problems: string[] = [];
-        const host = freshHost(server);
+        const host = await freshHost(server);
         host.respond(/.*/, 'hang');
         for (const target of await jobTargets(server, host)) {
           const controller = new AbortController();

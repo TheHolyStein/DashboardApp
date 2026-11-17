@@ -4,6 +4,7 @@
   import { Button, Pane } from '@dash/ui';
   import { clientModules } from '../generated/modules.js';
   import { moduleApi, api } from '../lib/api.js';
+  import { userFormat } from '../lib/host.js';
   import { t } from '../lib/i18n.js';
   import { settingsUi } from '../lib/ui-state.svelte.js';
   import { pages } from '../lib/pages.svelte.js';
@@ -159,7 +160,7 @@
       >
         {#if phase === 'custom' && custom}
           {@const Custom = custom}
-          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} api={moduleApi(instance.moduleId)} {t} />
+          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} api={moduleApi(instance.moduleId)} {t} {...userFormat()} />
         {:else}
           <SchemaForm {fields} value={form} {errors} onChange={(v) => (form = v)} {t} moduleId={instance.moduleId} {secretsSet} />
         {/if}
