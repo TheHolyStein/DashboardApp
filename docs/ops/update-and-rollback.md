@@ -87,7 +87,7 @@ sudo git -C /opt/dashboard rev-parse HEAD
    Then list the finished backups, newest first, with the revision each `.done.rev` file holds:
 
 ```
-for f in $(ls -t /var/lib/dashboard/backups/*.done.rev); do echo "$f: $(cat "$f")"; done
+sudo sh -c 'for f in $(ls -t /var/lib/dashboard/backups/*.done.rev); do echo "$f: $(cat "$f")"; done'
 ```
 
    Take the newest pair named `pre-<version>-<revision start>-<timestamp>.done.sqlite` and `...done.rev` whose revision is different from the one printed first. Skip every pair whose revision is the current one: a rebuild of the version that is running now (`install.sh --rebuild`) also makes a backup and marks it `.done`, and its database is already the post-update state. The time stamps in the names tell you which pair is from the update you want to undo.
