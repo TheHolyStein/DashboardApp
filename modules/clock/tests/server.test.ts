@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { ModuleInstance } from '@dash/contract';
 import { applyMigrations, createMockHost, createMockRouter, runServerContractSuite } from '@dash/module-kit/testing';
 import server from '../server/index.js';
-import { createTimer, dueTimers, listTimers, markFired } from '../server/timers.js';
+import { MAX_ACTIVE, createTimer, dueTimers, listTimers, markFired, purgeFired } from '../server/timers.js';
 import type { Snapshot } from '../manifest.js';
 
 runServerContractSuite(server, { moduleDir: import.meta.dirname + '/..' });
@@ -65,7 +65,16 @@ describe('tick job', () => {
     await tick();
     await tick();
     expect(host.published).toEqual([{ name: 'timer.finished', payload: { id: t.id, label: 'Pasta' } }]);
-    expect(host.notified).toEqual([{ level: 'info', title: 'Pasta', userIds: ['u2'], dedupeKey: `timer:${t.id}` }]);
+    expect(host.notified).toEqual([
+      {
+        level: 'info',
+        title: 'Pasta',
+        titleKey: 'm.clock.notify.finished',
+        vars: { label: 'Pasta' },
+        userIds: ['u2'],
+        dedupeKey: `timer:${t.id}`,
+      },
+    ]);
   });
 
   test('an unlabelled timer notifies with a default title', async () => {
@@ -158,9 +167,122 @@ describe('onInstanceChange', () => {
   test('added pushes the new instance snapshot immediately', async () => {
     const { host, db } = setup();
     createTimer(db, 'u1', { label: 'tea', durationSec: 60 }, START);
+    host.setInstances([inst('i9', 'u1')]); // the host lists an instance by the time it reports it added
     await server.onInstanceChange!('added', inst('i9', 'u1'), host);
     expect(host.pushed).toHaveLength(1);
     expect(host.pushed[0]).toMatchObject({ instanceId: 'i9', data: { timers: [{ label: 'tea', durationSec: 60 }], nextEvent: null } });
+  });
+});
+
+describe('tick hardening', () => {
+  test('a removed instance is forgotten: no push while gone, a fresh push when it returns', async () => {
+    const { host, router, tick, pushedTo } = setup();
+    await tick();
+    host.pushed.length = 0;
+    host.setInstances([inst('i2', 'u2'), inst('i3', 'u1')]); // i1 removed
+    await server.onInstanceChange!('removed', inst('i1', 'u1'), host);
+    const res = await router.call('POST', '/timers', { level: 'edit', body: { label: 'x', durationSec: 60 } });
+    expect(res.status).toBe(200);
+    expect(pushedTo('i1')).toHaveLength(0);
+    expect(pushedTo('i3')).toHaveLength(1);
+    host.pushed.length = 0;
+    host.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), inst('i3', 'u1')]);
+    await server.onInstanceChange!('added', inst('i1', 'u1'), host);
+    expect(pushedTo('i1')).toHaveLength(1); // same content as before, but forgotten
+  });
+
+  test('an instance removed while the tick builds snapshots is not pushed', async () => {
+    const { host, db, tick, pushedTo } = setup();
+    createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
+    await tick();
+    host.pushed.length = 0;
+    host.advance(5_000);
+    const real = host.instances.bind(host);
+    let calls = 0;
+    host.instances = async <S>() => {
+      calls++;
+      const list = await real<S>();
+      return calls === 1 ? list : list.filter((i) => i.id !== 'i1'); // gone by the membership re-check
+    };
+    await tick();
+    expect(pushedTo('i1')).toHaveLength(0);
+    expect(pushedTo('i3')).toHaveLength(1);
+  });
+
+  test('calendar.event.upcoming for two users pushes each user\'s instances separately and nothing to a third', async () => {
+    const { host, pushedTo } = setup();
+    host.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), inst('i3', 'u1'), inst('i4', 'u3')]);
+    const on = server.on!['calendar.event.upcoming']!;
+    await on({ uid: 'a', title: 'A', start: '2026-01-01T12:30:00.000Z', minutesUntil: 30, userIds: ['u1'] }, host);
+    await on({ uid: 'b', title: 'B', start: '2026-01-01T12:40:00.000Z', minutesUntil: 40, userIds: ['u2'] }, host);
+    expect(pushedTo('i1').map((p) => (p.data as Snapshot).nextEvent?.title)).toEqual(['A']);
+    expect(pushedTo('i3').map((p) => (p.data as Snapshot).nextEvent?.title)).toEqual(['A']);
+    expect(pushedTo('i2').map((p) => (p.data as Snapshot).nextEvent?.title)).toEqual(['B']);
+    expect(pushedTo('i4')).toHaveLength(0);
+  });
+
+  test('the 51st running timer of one owner is refused with a clear message; others are unaffected', async () => {
+    const { router, db } = setup();
+    for (let i = 0; i < MAX_ACTIVE; i++) createTimer(db, 'u1', { label: `t${i}`, durationSec: 600 }, START);
+    const res = await router.call('POST', '/timers', { level: 'edit', body: { label: 'one too many', durationSec: 60 } });
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).toContain('at most 50');
+    expect((await router.call('POST', '/timers', { level: 'edit', user: { id: 'u2' }, body: { label: 'ok', durationSec: 60 } })).status).toBe(200);
+  });
+
+  test('fired rows older than a day are purged by tick, at most once an hour', async () => {
+    const { host, db, tick } = setup();
+    const old = createTimer(db, 'u1', { label: 'old', durationSec: 5 }, START);
+    markFired(db, old.id);
+    const count = () => db.get<{ n: number }>('SELECT COUNT(*) AS n FROM m_clock_timers')!.n;
+    await tick(); // first tick purges, but the row is not a day old yet
+    expect(count()).toBe(1);
+    host.advance(86_400_000 + 10_000);
+    await tick(); // an hour has passed since the last purge: runs
+    expect(count()).toBe(0);
+    const again = createTimer(db, 'u1', { label: 'again', durationSec: 5 }, new Date(host.now().getTime() - 86_400_000));
+    markFired(db, again.id);
+    host.advance(600_000);
+    await tick(); // 10 minutes after the last purge: skipped
+    expect(count()).toBe(1);
+    host.advance(3_000_000);
+    await tick();
+    expect(count()).toBe(0);
+    expect(purgeFired(db, host.now())).toBe(0);
+  });
+
+  test('a publish that throws for one timer does not stop the next timer from firing', async () => {
+    const { host, db, tick, pushedTo } = setup();
+    const a = createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
+    const b = createTimer(db, 'u2', { label: 'b', durationSec: 6 }, START);
+    await tick();
+    host.pushed.length = 0;
+    const publish = host.bus.publish.bind(host.bus);
+    host.bus.publish = ((name: string, payload: { id?: string }) => {
+      if (payload.id === a.id) throw new Error('bus down');
+      return (publish as (n: string, p: unknown) => void)(name, payload);
+    }) as typeof host.bus.publish;
+    const error = vi.spyOn(host.log, 'error');
+    host.advance(10_000);
+    await tick();
+    expect(error).toHaveBeenCalledOnce();
+    expect(host.published.map((p) => (p.payload as { id: string }).id)).toEqual([b.id]);
+    expect(host.notified.map((n) => n.dedupeKey)).toEqual([`timer:${a.id}`, `timer:${b.id}`]);
+    expect(pushedTo('i1')).toHaveLength(1); // dirty was set before the failure
+    await tick();
+    expect(host.notified).toHaveLength(2); // both are marked fired: nothing fires twice
+  });
+
+  test('an idle tick makes no instances() call and no kv scan', async () => {
+    const { host, tick } = setup();
+    await tick();
+    const instances = vi.spyOn(host, 'instances');
+    const keys = vi.spyOn(host.store, 'keys');
+    host.advance(5_000);
+    await tick();
+    await tick();
+    expect(instances).not.toHaveBeenCalled();
+    expect(keys).not.toHaveBeenCalled();
   });
 });
 
