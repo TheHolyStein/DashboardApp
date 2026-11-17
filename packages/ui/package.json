@@ -11,7 +11,8 @@
     "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@dash/contract": "workspace:*"
+    "@dash/contract": "workspace:*",
+    "uplot": "^1.6.32"
   },
   "peerDependencies": {
     "svelte": "^5.57.3"

@@ -344,6 +344,9 @@ importers:
       '@dash/contract':
         specifier: workspace:*
         version: link:../contract
+      uplot:
+        specifier: ^1.6.32
+        version: 1.6.32
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^7.3.1
@@ -2768,6 +2771,9 @@ packages:
   until-async@3.0.2:
     resolution: {integrity: sha512-IiSk4HlzAMqTUseHHe3VhIGyuFmN90zMTpD3Z3y8jeQbzLIq500MVM7Jq2vUAnTKAFPJrqwkzr6PoTcPhGcOiw==}
 
+  uplot@1.6.32:
+    resolution: {integrity: sha512-KIMVnG68zvu5XXUbC4LQEPnhwOxBuLyW1AHtpm6IKTXImkbLgkMy+jabjLgSLMasNuGGzQm/ep3tOkyTxpiQIw==}
+
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
@@ -4979,6 +4985,8 @@ snapshots:
       '@unrs/resolver-binding-win32-x64-msvc': 1.13.0
 
   until-async@3.0.2: {}
+
+  uplot@1.6.32: {}
 
   uri-js@4.4.1:
     dependencies:
