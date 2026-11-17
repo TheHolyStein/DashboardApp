@@ -4,3 +4,6 @@ declare module '*.svelte' {
   const component: Component<any>;
   export default component;
 }
+
+// @dash/ui's Chart imports uPlot's stylesheet; modules type-check that source too.
+declare module 'uplot/dist/uPlot.min.css';

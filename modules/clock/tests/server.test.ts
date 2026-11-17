@@ -225,3 +225,46 @@ describe('routes', () => {
     expect(host.pushed).toEqual([]);
   });
 });
+
+describe('zones routes', () => {
+  test('GET /zones is empty by default, per user', async () => {
+    const { router } = setup();
+    expect(await router.call('GET', '/zones', { level: 'view' })).toEqual({ status: 200, body: [] });
+  });
+
+  test('PUT /zones stores the list for the caller only', async () => {
+    const { router } = setup();
+    const put = await router.call('PUT', '/zones', { level: 'edit', body: { zones: ['Europe/Berlin', 'UTC'] } });
+    expect(put).toEqual({ status: 200, body: ['Europe/Berlin', 'UTC'] });
+    expect((await router.call('GET', '/zones', { level: 'view' })).body).toEqual(['Europe/Berlin', 'UTC']);
+    expect((await router.call('GET', '/zones', { level: 'view', user: { id: 'u2' } })).body).toEqual([]);
+  });
+
+  test('PUT /zones dedupes and keeps order', async () => {
+    const { router } = setup();
+    const put = await router.call('PUT', '/zones', {
+      level: 'edit',
+      body: { zones: ['Asia/Tokyo', 'UTC', 'Asia/Tokyo'] },
+    });
+    expect(put.body).toEqual(['Asia/Tokyo', 'UTC']);
+  });
+
+  test('invalid zone rejected with 422', async () => {
+    const { router } = setup();
+    const res = await router.call('PUT', '/zones', { level: 'edit', body: { zones: ['Europe/Berlin', 'Mars/Base'] } });
+    expect(res.status).toBe(422);
+    expect((await router.call('GET', '/zones', { level: 'view' })).body).toEqual([]);
+  });
+
+  test('PUT /zones accepts 12 entries and rejects 13 with 422', async () => {
+    const { router } = setup();
+    const all = Intl.supportedValuesOf('timeZone');
+    expect((await router.call('PUT', '/zones', { level: 'edit', body: { zones: all.slice(0, 12) } })).status).toBe(200);
+    expect((await router.call('PUT', '/zones', { level: 'edit', body: { zones: all.slice(0, 13) } })).status).toBe(422);
+  });
+
+  test('PUT /zones needs level edit', async () => {
+    const { router } = setup();
+    expect((await router.call('PUT', '/zones', { level: 'view', body: { zones: [] } })).status).toBe(403);
+  });
+});

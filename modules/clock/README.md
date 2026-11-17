@@ -38,3 +38,13 @@ A snapshot is pushed only when its content changed; every instance gets one on s
 | `GET /timers` | view |
 | `POST /timers` `{ label, durationSec }` | edit |
 | `DELETE /timers/:id` | edit |
+| `GET /zones` | view |
+| `PUT /zones` `{ zones: string[] }` | edit |
+
+`/zones` is the caller's own world-clock list (`store` key `zones:<userId>`, empty by default). `PUT` takes at most 12 entries, each a name from `Intl.supportedValuesOf('timeZone')` or `UTC`; duplicates are dropped (order kept); anything else is 422 `invalid`.
+
+## Client
+
+- **Tile**: the theme's clock face (`face` setting, else the theme default; resolved through the shell's `dash:theme` context `clockFace(id)`, falling back to the theme default and then to a built-in digital readout). Below it: the date (`showDate`), the next event with a countdown ("in 25 min", "in 2 h", "now"; `showNextEvent`) and up to two running timers with "+n" for more. At the minimum size (2x1) only the face and its label are shown. There is no needs-setup state: the clock needs no configuration and shows the time even before the first snapshot.
+- **Time source**: `useNow` re-arms one timeout to the next minute boundary (next second when `showSeconds` is on or a timer is running), pauses while the document is hidden and re-syncs when visible.
+- **Detail**: world clocks (add/remove at level `edit`), timers (create with label, minutes and seconds; cancel) and a stopwatch (start, stop, lap, reset; local to the pane, not saved). Controls that change stored data carry `data-edit` and are absent at level `view`.

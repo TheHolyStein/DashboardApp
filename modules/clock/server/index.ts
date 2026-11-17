@@ -2,6 +2,7 @@ import { DashError } from '@dash/contract';
 import { abortable, defineServer } from '@dash/module-kit';
 import manifest from '../manifest.js';
 import { forget, hasPushed, nextKey, pushSnapshots, type NextEvent } from './snapshot.js';
+import { normaliseZones, zonesInput, zonesKey } from './zones.js';
 import { createTimer, deleteTimer, dueTimers, listTimers, markFired, timerInput, type Timer } from './timers.js';
 
 const toWire = (t: Timer) => ({ id: t.id, label: t.label, endsAt: t.endsAt, durationSec: t.durationSec });
@@ -98,6 +99,15 @@ export default defineServer({
       const timer = createTimer(host.store.db, req.user.id, body, host.now());
       await pushFor(req.user.id);
       return toWire(timer);
+    });
+
+    // The caller's own world-clock list; empty until they save one.
+    r.get('/zones', { level: 'view' }, async (req) => (await host.store.get<string[]>(zonesKey(req.user.id))) ?? []);
+
+    r.put('/zones', { level: 'edit', body: zonesInput }, async (req) => {
+      const zones = normaliseZones(zonesInput.parse(req.body).zones);
+      await host.store.set(zonesKey(req.user.id), zones);
+      return zones;
     });
 
     r.delete('/timers/:id', { level: 'edit' }, async (req) => {
