@@ -85,6 +85,9 @@ export function wireModuleSubscriptions(bus: Bus, mod: LoadedModule): void {
   >;
   for (const [name, handler] of Object.entries(on)) {
     if (!handler) continue;
-    bus.subscribe(mod.id, name as EventName, (payload) => handler(payload, mod.host));
+    bus.subscribe(mod.id, name as EventName, (payload) =>
+      // Read live: a disabled module, or one whose setup has not run, gets no events.
+      mod.failed === undefined && mod.enabled && mod.setupRan ? handler(payload, mod.host) : undefined,
+    );
   }
 }

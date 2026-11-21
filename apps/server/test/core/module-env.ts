@@ -122,7 +122,7 @@ export function jobModule(
     },
     jobs: handlers,
   });
-  return { id, server, host: {} as HostServices, enabled: opts.enabled ?? true, ...(opts.failed ? { failed: opts.failed } : {}) };
+  return { id, server, host: {} as HostServices, enabled: opts.enabled ?? true, setupRan: true, ...(opts.failed ? { failed: opts.failed } : {}) };
 }
 
 export interface ModuleEnv {

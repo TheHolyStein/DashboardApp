@@ -100,7 +100,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   const eligible = (e: Entry, t: number): boolean =>
-    !e.removed && e.mod.enabled && !e.mod.failed && !pausedByMinimal(e) && (e.spec.mode === 'always' || isViewed(e, t));
+    !e.removed && e.mod.enabled && e.mod.setupRan && !e.mod.failed && !pausedByMinimal(e) && (e.spec.mode === 'always' || isViewed(e, t));
 
   function loadState(e: Entry): void {
     selectState ??= db.prepare(
@@ -259,7 +259,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const t = nowMs();
     for (const e of entries.values()) {
       if (e.running || e.queued || e.nextAt === null || e.nextAt > t) continue;
-      if (!e.mod.enabled || e.mod.failed) {
+      if (!e.mod.enabled || !e.mod.setupRan || e.mod.failed) {
         e.nextAt = t + okDelay(e.spec); // look again next interval; picks up re-enabling
         continue;
       }
@@ -357,7 +357,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const usable = [...entries.values()].filter(
       (e) =>
         e.mod.id === moduleId && e.spec.name === job && (instanceId === undefined || e.instance?.id === instanceId) &&
-        e.mod.enabled && !e.mod.failed,
+        e.mod.enabled && e.mod.setupRan && !e.mod.failed,
     );
     if (stopped || usable.length === 0) {
       return Promise.reject(new DashError('not_found', `unknown job ${moduleId}/${job}${instanceId ? `/${instanceId}` : ''}`));

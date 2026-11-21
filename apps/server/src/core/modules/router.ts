@@ -35,7 +35,7 @@ function userOf(u: SessionUser): RouteRequest['user'] {
 
 /** Module must be loaded and enabled right now (evaluated per request). */
 function requireAvailable(mod: LoadedModule): void {
-  if (mod.failed !== undefined || !mod.enabled) throw new DashError('not_found', 'Not found');
+  if (mod.failed !== undefined || !mod.enabled || !mod.setupRan) throw new DashError('not_found', 'Not found');
 }
 
 function resolveLevel(auth: AuthSeam, user: SessionUser, mod: LoadedModule): 'view' | 'edit' {

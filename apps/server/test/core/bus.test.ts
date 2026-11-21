@@ -82,7 +82,7 @@ describe('event bus', () => {
     });
     const host = { marker: true } as unknown as LoadedModule['host'];
     const { bus } = setup([server.manifest]);
-    wireModuleSubscriptions(bus, { id: 'sub', server, host, enabled: true });
+    wireModuleSubscriptions(bus, { id: 'sub', server, host, enabled: true, setupRan: true });
     bus.publish('core', 'time.sun', sun);
     await flush();
     expect(calls).toEqual([[sun, host]]);

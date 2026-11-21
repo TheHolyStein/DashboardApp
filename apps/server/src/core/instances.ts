@@ -93,7 +93,7 @@ export function moduleOf(deps: Pick<CoreRouteDeps, 'modules'>, id: ModuleId): Lo
   return deps.modules.find((m) => m.id === id);
 }
 
-export const isAvailable = (m: LoadedModule | undefined): m is LoadedModule => m !== undefined && m.failed === undefined && m.enabled;
+export const isAvailable = (m: LoadedModule | undefined): m is LoadedModule => m !== undefined && m.failed === undefined && m.enabled && m.setupRan;
 
 // ---- providers for the scheduler and host -------------------------------------------------------------
 
@@ -134,7 +134,7 @@ export async function notifyInstanceChange(
   kind: 'added' | 'updated' | 'removed',
   instance: ModuleInstance,
 ): Promise<void> {
-  if (!mod || mod.failed !== undefined || !mod.server.onInstanceChange) return;
+  if (!mod || mod.failed !== undefined || !mod.enabled || !mod.setupRan || !mod.server.onInstanceChange) return;
   try {
     await mod.server.onInstanceChange(kind, instance, mod.host);
   } catch (err) {

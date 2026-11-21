@@ -256,7 +256,7 @@ Exit code 0 means no FAIL. Exit code 1 means at least one FAIL. Add `--json` for
 
 - Timers are checked every 5 seconds, so a finished timer can notify up to 5 seconds late; this is normal.
 - Time and dates follow the saved language and time zone of the signed-in person (Settings, Account), not the phone's.
-- A module that an administrator turned off before the last restart is set up when it is turned on again (Settings, Modules). If that fails the screen shows "Module setup failed" with the reason, and the module stays off until the problem is fixed and the service is restarted.
+- A module that an administrator turned off before the last restart is set up when it is turned on again (Settings, Modules). If that fails the screen shows "Module setup failed" with the reason, and the module stays off. Fix the problem and restart the service; after the restart the module is still off, so turn it on again in Settings, Modules.
 
 ## Things this guide could not verify
 

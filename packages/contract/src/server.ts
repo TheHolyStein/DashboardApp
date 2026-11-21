@@ -65,10 +65,14 @@ export interface ModuleServer<S = unknown> {
   /**
    * Called once per loaded, enabled module, after migrations and before the first job, route or event handler runs.
    * Keep per-host state (snapshot pusher, caches) in a closure created here, never at module scope.
-   * A throw or rejection marks the module failed.
+   * A throw, a rejection or running longer than 5 s marks the module failed (and `teardown` is not called), so
+   * `setup` must clean up after itself (timers, subscriptions) when it fails part-way.
    */
   setup?: (host: HostServices) => void | Promise<void>;
-  /** Called on server shutdown, before the database closes. Errors are logged and ignored. */
+  /**
+   * Called on server shutdown, before the database closes, only for modules whose `setup` succeeded (never for a
+   * module that was disabled at start and not enabled since). Errors are logged and ignored; it is abandoned after 3 s.
+   */
   teardown?: (host: HostServices) => void | Promise<void>;
   // keys must equal manifest.jobs[].name
   jobs?: Record<string, (ctx: JobContext<S>) => Promise<void>>;

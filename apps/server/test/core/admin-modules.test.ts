@@ -7,7 +7,7 @@ import { registerAdminModuleRoutes } from '../../src/core/admin-modules.ts';
 import { openDb } from '../../src/core/db.ts';
 import { errorHandler } from '../../src/core/errors.ts';
 import { migrateCore } from '../../src/core/migrate.ts';
-import { loadModules, type LoadedModule } from '../../src/core/modules/loader.ts';
+import { loadModules, teardownModules, type LoadedModule } from '../../src/core/modules/loader.ts';
 import { testAuth } from './helpers.ts';
 import { serverFor, silentLogger } from './module-env.ts';
 import { USERS } from './pages-env.ts';
@@ -18,7 +18,7 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function env(setup: (host: HostServices) => void | Promise<void>) {
+async function env(setup: (host: HostServices) => void | Promise<void>, teardown?: () => void) {
   const db = openDb(':memory:');
   migrateCore(db);
   db.prepare('INSERT INTO module_state (module_id, enabled) VALUES (?, 0)').run('late');
@@ -26,7 +26,7 @@ async function env(setup: (host: HostServices) => void | Promise<void>) {
   const eager = vi.fn();
   const modules: LoadedModule[] = await loadModules(
     [
-      async () => ({ default: serverFor('late', undefined, { setup: setupOn }) }),
+      async () => ({ default: serverFor('late', undefined, { setup: setupOn, ...(teardown ? { teardown } : {}) }) }),
       async () => ({ default: serverFor('early', undefined, { setup: eager }) }),
     ],
     db,
@@ -76,6 +76,48 @@ describe('enabling a module that was disabled at startup', () => {
     await e.put('late', false);
     await e.put('late', true);
     expect(e.setupOn).toHaveBeenCalledOnce();
+  });
+
+  it('enable, disable, enable sets up once; shutdown then tears down once', async () => {
+    const teardown = vi.fn();
+    const e = await env(async () => {}, teardown);
+    await e.put('late', true);
+    await e.put('late', false);
+    await e.put('late', true);
+    expect(e.setupOn).toHaveBeenCalledOnce();
+    await teardownModules(e.modules, silentLogger);
+    await teardownModules(e.modules, silentLogger);
+    expect(teardown).toHaveBeenCalledOnce();
+  });
+
+  it('two concurrent enables run setup once, and both answer 200', async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const e = await env(() => gate);
+    const first = e.put('late', true);
+    const second = e.put('late', true);
+    await vi.waitFor(() => expect(e.setupOn).toHaveBeenCalled());
+    release();
+    expect((await first).status).toBe(200);
+    expect((await second).status).toBe(200);
+    expect(e.setupOn).toHaveBeenCalledOnce();
+  });
+
+  it('a disable during setup waits for it, ends disabled, and tears down once', async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const teardown = vi.fn();
+    const e = await env(() => gate, teardown);
+    const enable = e.put('late', true);
+    await vi.waitFor(() => expect(e.setupOn).toHaveBeenCalled());
+    const disable = e.put('late', false);
+    await new Promise((resolve) => setTimeout(resolve, 30)); // let the disable request reach its handler
+    release();
+    expect((await enable).status).toBe(200);
+    expect((await disable).status).toBe(200);
+    expect(e.modules.find((m) => m.id === 'late')!.enabled).toBe(false);
+    expect(e.setupOn).toHaveBeenCalledOnce();
+    expect(teardown).toHaveBeenCalledOnce();
   });
 
   it('does not set up again a module that was enabled at startup', async () => {

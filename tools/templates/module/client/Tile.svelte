@@ -23,6 +23,7 @@
     <p>{t('m.__ID__.loading', 'Loading')}</p>
   {/if}
   <!-- The frame already shows a stale badge; do not re-implement it. Just do not invent progress from stale data. -->
+  <!-- User-written text (names, titles, notes) is exempt from t(): wrap it, e.g. <span data-user>{item.title}</span>. -->
   {#if level === 'edit'}
     <button type="button" data-edit>{t('m.__ID__.edit', 'Edit')}</button>
   {/if}

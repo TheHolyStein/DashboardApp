@@ -14,6 +14,25 @@ export interface LoaderDeps {
   makeHost(server: ModuleServer): HostServices;
 }
 
+/** Per-module time limits for the lifecycle hooks. */
+export const SETUP_TIMEOUT_MS = 5_000;
+export const TEARDOWN_TIMEOUT_MS = 3_000;
+
+/** Runs `fn`, rejecting with a timeout error after `ms`. The hook itself cannot be cancelled; it is abandoned. */
+export async function withTimeout(fn: () => void | Promise<void>, ms: number, what: string): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 type Registry = ReadonlyArray<() => Promise<{ default: ModuleServer }>>;
 
 function problemsOf(server: ModuleServer): string[] {
@@ -53,6 +72,7 @@ export async function loadModules(
       host: undefined as unknown as HostServices,
       enabled: false,
       failed: reason,
+      setupRan: false,
     };
   };
 
@@ -75,16 +95,19 @@ export async function loadModules(
       db.prepare('INSERT OR IGNORE INTO module_state (module_id) VALUES (?)').run(id);
       const enabled = db.prepare('SELECT enabled FROM module_state WHERE module_id = ?').pluck().get(id) !== 0;
       const host = deps.makeHost(server);
-      if (enabled && server.setup) {
+      const setup = server.setup;
+      let setupRan = false;
+      if (enabled && setup) {
         try {
-          await server.setup(host);
+          await withTimeout(() => setup(host), SETUP_TIMEOUT_MS, 'setup');
+          setupRan = true;
         } catch (err) {
           out.push(failedModule(id, server, `setup failed: ${err instanceof Error ? err.message : String(err)}`));
           continue;
         }
       }
       seen.add(id);
-      out.push({ id, server, host, enabled });
+      out.push({ id, server, host, enabled, setupRan: setupRan || (enabled && !setup) });
     } catch (err) {
       out.push(failedModule(id, server, err instanceof Error ? err.message : String(err)));
     }
@@ -92,14 +115,26 @@ export async function loadModules(
   return out;
 }
 
-/** Calls every loaded module's `teardown` (errors logged, never thrown). Call on shutdown before the database closes. */
-export async function teardownModules(modules: readonly LoadedModule[], logger: LoggerLike): Promise<void> {
-  for (const mod of modules) {
-    if (mod.failed !== undefined || !mod.server.teardown) continue;
-    try {
-      await mod.server.teardown(mod.host);
-    } catch (err) {
-      logger.error({ module: mod.id, err: err instanceof Error ? err.message : String(err) }, 'module teardown failed');
-    }
+/**
+ * Calls `teardown` on every module whose `setup` ran (a module that was disabled at start, failed or never set up is
+ * skipped), errors logged, never thrown. Call on shutdown before the database closes.
+ * Each teardown is bounded by TEARDOWN_TIMEOUT_MS and they run concurrently (`Promise.allSettled`): sequential runs
+ * would let four slow modules (4 x 3 s) exceed the 10 s shutdown limit in main.ts, whereas concurrently the total
+ * stays at one timeout (3 s) however many modules hang. Modules are independent, so order does not matter.
+ */
+/** Tears one module down if its `setup` ran (bounded, errors logged), and marks it as not set up. */
+export async function teardownModule(mod: LoadedModule, logger: LoggerLike): Promise<void> {
+  if (mod.failed !== undefined || !mod.setupRan) return;
+  mod.setupRan = false;
+  const teardown = mod.server.teardown;
+  if (!teardown) return;
+  try {
+    await withTimeout(() => teardown(mod.host), TEARDOWN_TIMEOUT_MS, 'teardown');
+  } catch (err) {
+    logger.error({ module: mod.id, err: err instanceof Error ? err.message : String(err) }, 'module teardown failed');
   }
+}
+
+export async function teardownModules(modules: readonly LoadedModule[], logger: LoggerLike): Promise<void> {
+  await Promise.allSettled(modules.map((mod) => teardownModule(mod, logger)));
 }

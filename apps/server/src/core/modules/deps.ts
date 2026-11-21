@@ -36,6 +36,8 @@ export interface LoadedModule {
   enabled: boolean;
   /** Reason the module could not be loaded; the module is then unreachable (404) and not scheduled. */
   failed?: string;
+  /** True once `setup` ran successfully (or the module has none). `teardown` is only called when this is set. */
+  setupRan: boolean;
 }
 
 // ---- A4 (copied from the A4 brief) ---------------------------------------------------------------

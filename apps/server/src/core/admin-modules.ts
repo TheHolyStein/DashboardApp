@@ -6,6 +6,7 @@ import type { CoreSeam, SessionUser } from '../seams.js';
 import { parseWith, secured } from './csrf.js';
 import { moduleOf, pageAudience, type CoreRouteDeps, type PageRow } from './instances.js';
 import type { LoadedModule, Scheduler } from './modules/deps.js';
+import { SETUP_TIMEOUT_MS, teardownModule, withTimeout } from './modules/loader.js';
 
 export interface AdminModuleDeps extends CoreRouteDeps {
   scheduler: Pick<Scheduler, 'syncInstances' | 'register'>;
@@ -28,13 +29,37 @@ const hasConfig = (mod: LoadedModule): boolean =>
  * affected page); enabling does the reverse. A module that was disabled when the server started was never set up
  * (the loader only runs `setup` for enabled modules): enabling it runs `setup(host)` first. If that throws, the module
  * stays disabled and is marked failed (like a load failure), the error is logged, and the request answers
- * 500 `internal` with the message "Module setup failed: <reason>", which the admin screen shows. A restart retries. `Stream.disconnectUser(user, module)` is deliberately not used: it mutes
- * the module on open connections until they reconnect, which would hide a re-enabled module.
+ * 500 `internal` with the message "Module setup failed: <reason>", which the admin screen shows. A restart retries.
+ * Setups in flight are tracked per module: a second enable awaits the same setup (it never runs twice), and a disable
+ * that arrives mid-setup waits for it to settle, then disables and, if the setup succeeded, runs `teardown`.
+ * `Stream.disconnectUser(user, module)` is deliberately not used: it mutes the module on open connections until they
+ * reconnect, which would hide a re-enabled module.
  */
 export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModuleDeps): void {
   const { db, auth } = deps;
-  // Modules the loader set up (enabled and not failed at registration); later ones are set up on first enable.
-  const setUp = new Set(deps.modules.filter((m) => m.failed === undefined && m.enabled).map((m) => m.id));
+  const inflight = new Map<string, Promise<void>>();
+  const ensureSetUp = (mod: LoadedModule): Promise<void> => {
+    if (mod.setupRan) return Promise.resolve();
+    let pending = inflight.get(mod.id);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          await withTimeout(() => mod.server.setup?.(mod.host), SETUP_TIMEOUT_MS, 'setup');
+          mod.setupRan = true;
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          mod.enabled = false;
+          mod.failed = `setup failed: ${reason}`;
+          deps.logger.error({ module: mod.id, reason }, 'module setup failed on enable');
+          throw new DashError('internal', `Module setup failed: ${reason}`);
+        } finally {
+          inflight.delete(mod.id);
+        }
+      })();
+      inflight.set(mod.id, pending);
+    }
+    return pending;
+  };
 
   const find = (id: string): LoadedModule => {
     const mod = moduleOf(deps, id);
@@ -90,16 +115,13 @@ export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModul
     requireAdmin(user);
     const mod = find((req.params as { id: string }).id);
     const { enabled } = parseWith(EnabledBody, req.body);
-    if (enabled && !setUp.has(mod.id)) {
-      try {
-        await mod.server.setup?.(mod.host);
-        setUp.add(mod.id);
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        mod.enabled = false;
-        mod.failed = `setup failed: ${reason}`;
-        deps.logger.error({ module: mod.id, reason }, 'module setup failed on enable');
-        throw new DashError('internal', `Module setup failed: ${reason}`);
+    if (enabled) {
+      await ensureSetUp(mod);
+    } else {
+      const pending = inflight.get(mod.id);
+      if (pending) {
+        await pending.catch(() => undefined); // a failed setup is reported to its own request
+        await teardownModule(mod, deps.logger);
       }
     }
     db.prepare(

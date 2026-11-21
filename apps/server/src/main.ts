@@ -103,6 +103,7 @@ export async function start(env: NodeJS.ProcessEnv = process.env, opts: StartOpt
     try {
       await services?.scheduler.stop();
       await app?.close();
+      await services?.teardown(); // setup already ran inside compose
     } finally {
       if (db.open) db.close();
     }
