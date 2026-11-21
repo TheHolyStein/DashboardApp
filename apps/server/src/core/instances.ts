@@ -127,14 +127,18 @@ export function createModuleState(db: BetterSqlite3.Database): ModuleStateDep {
 
 // ---- after-change plumbing ----------------------------------------------------------------------------
 
-/** Runs the module's `onInstanceChange` (errors logged, never thrown). */
+/**
+ * Runs the module's `onInstanceChange` (errors logged, never thrown). Needs a module whose `setup` ran. A disabled
+ * module still gets `'removed'` (so it can delete the instance's data) but not `'added'` or `'updated'`.
+ */
 export async function notifyInstanceChange(
   deps: Pick<CoreRouteDeps, 'logger'>,
   mod: LoadedModule | undefined,
   kind: 'added' | 'updated' | 'removed',
   instance: ModuleInstance,
 ): Promise<void> {
-  if (!mod || mod.failed !== undefined || !mod.enabled || !mod.setupRan || !mod.server.onInstanceChange) return;
+  if (!mod || mod.failed !== undefined || !mod.setupRan || !mod.server.onInstanceChange) return;
+  if (!mod.enabled && kind !== 'removed') return;
   try {
     await mod.server.onInstanceChange(kind, instance, mod.host);
   } catch (err) {

@@ -115,13 +115,6 @@ export async function loadModules(
   return out;
 }
 
-/**
- * Calls `teardown` on every module whose `setup` ran (a module that was disabled at start, failed or never set up is
- * skipped), errors logged, never thrown. Call on shutdown before the database closes.
- * Each teardown is bounded by TEARDOWN_TIMEOUT_MS and they run concurrently (`Promise.allSettled`): sequential runs
- * would let four slow modules (4 x 3 s) exceed the 10 s shutdown limit in main.ts, whereas concurrently the total
- * stays at one timeout (3 s) however many modules hang. Modules are independent, so order does not matter.
- */
 /** Tears one module down if its `setup` ran (bounded, errors logged), and marks it as not set up. */
 export async function teardownModule(mod: LoadedModule, logger: LoggerLike): Promise<void> {
   if (mod.failed !== undefined || !mod.setupRan) return;
@@ -135,6 +128,13 @@ export async function teardownModule(mod: LoadedModule, logger: LoggerLike): Pro
   }
 }
 
+/**
+ * Calls `teardown` on every module whose `setup` ran (a module that was disabled at start, failed or never set up is
+ * skipped), errors logged, never thrown. Call on shutdown before the database closes.
+ * Each teardown is bounded by TEARDOWN_TIMEOUT_MS and they run concurrently (`Promise.allSettled`): sequential runs
+ * would let four slow modules (4 x 3 s) exceed the 10 s shutdown limit in main.ts, whereas concurrently the total
+ * stays at one timeout (3 s) however many modules hang. Modules are independent, so order does not matter.
+ */
 export async function teardownModules(modules: readonly LoadedModule[], logger: LoggerLike): Promise<void> {
   await Promise.allSettled(modules.map((mod) => teardownModule(mod, logger)));
 }

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await */
 // Modules that are disabled or never set up get no events, requests or instance notifications.
 import { describe, expect, it, vi } from 'vitest';
 import type { ModuleInstance } from '@dash/contract';
@@ -46,6 +45,21 @@ describe('event and instance-change gating', () => {
   ])('skips onInstanceChange of a %s module', async (_n, over) => {
     const { mod, change } = loaded(over);
     await notifyInstanceChange({ logger: silentLogger }, mod, 'added', {} as ModuleInstance);
+    expect(change).not.toHaveBeenCalled();
+  });
+
+  it('delivers "removed" to a disabled module that was set up, but not "added" or "updated"', async () => {
+    const { mod, change } = loaded({ enabled: false });
+    await notifyInstanceChange({ logger: silentLogger }, mod, 'removed', {} as ModuleInstance);
+    expect(change).toHaveBeenCalledOnce();
+    await notifyInstanceChange({ logger: silentLogger }, mod, 'added', {} as ModuleInstance);
+    await notifyInstanceChange({ logger: silentLogger }, mod, 'updated', {} as ModuleInstance);
+    expect(change).toHaveBeenCalledOnce();
+  });
+
+  it('does not deliver "removed" to a module that never ran setup', async () => {
+    const { mod, change } = loaded({ enabled: false, setupRan: false });
+    await notifyInstanceChange({ logger: silentLogger }, mod, 'removed', {} as ModuleInstance);
     expect(change).not.toHaveBeenCalled();
   });
 

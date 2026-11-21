@@ -18,7 +18,7 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function env(setup: (host: HostServices) => void | Promise<void>, teardown?: () => void) {
+async function env(setup: (host: HostServices) => void | Promise<void>, teardown?: () => void | Promise<void>) {
   const db = openDb(':memory:');
   migrateCore(db);
   db.prepare('INSERT INTO module_state (module_id, enabled) VALUES (?, 0)').run('late');
@@ -118,6 +118,42 @@ describe('enabling a module that was disabled at startup', () => {
     expect(e.modules.find((m) => m.id === 'late')!.enabled).toBe(false);
     expect(e.setupOn).toHaveBeenCalledOnce();
     expect(teardown).toHaveBeenCalledOnce();
+  });
+
+  it('an enable during a running teardown waits for it, then sets up once more', async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const log: string[] = [];
+    const teardown = vi.fn(() => {
+      log.push('teardown:start');
+      return gate.then(() => void log.push('teardown:end'));
+    });
+    const e = await env(async () => {
+      log.push('setup');
+      await new Promise((resolve) => setTimeout(resolve, 40)); // keep the first enable in flight while the others arrive
+    }, teardown);
+    const enable = e.put('late', true);
+    const disable = e.put('late', false); // queued behind the enable's setup: mid-setup, so it tears down
+    await vi.waitFor(() => expect(teardown).toHaveBeenCalled());
+    const again = e.put('late', true); // arrives while the teardown runs
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(e.setupOn).toHaveBeenCalledOnce(); // not started concurrently with the teardown
+    release();
+    expect((await enable).status).toBe(200);
+    expect((await disable).status).toBe(200);
+    expect((await again).status).toBe(200);
+    expect(log).toEqual(['setup', 'teardown:start', 'teardown:end', 'setup']);
+    expect(e.modules.find((m) => m.id === 'late')).toMatchObject({ enabled: true, setupRan: true });
+  });
+
+  it('enable, disable, enable, disable in quick succession balance setup and teardown', async () => {
+    const teardown = vi.fn();
+    const e = await env(() => new Promise((resolve) => setTimeout(resolve, 40)), teardown);
+    const results = await Promise.all([e.put('late', true), e.put('late', false), e.put('late', true), e.put('late', false)]);
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+    expect(e.setupOn).toHaveBeenCalledTimes(2);
+    expect(teardown).toHaveBeenCalledTimes(2);
+    expect(e.modules.find((m) => m.id === 'late')).toMatchObject({ enabled: false, setupRan: false });
   });
 
   it('does not set up again a module that was enabled at startup', async () => {

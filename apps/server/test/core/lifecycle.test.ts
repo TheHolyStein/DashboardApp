@@ -14,6 +14,8 @@ import {
   teardownModules,
   TEARDOWN_TIMEOUT_MS,
 } from '../../src/core/modules/loader.ts';
+import { compose } from '../../src/core/compose.ts';
+import { loadConfig } from '../../src/core/config.ts';
 import { start } from '../../src/main.ts';
 import { serverFor, silentLogger } from './module-env.ts';
 
@@ -92,6 +94,38 @@ describe('start() failure after compose', () => {
     } finally {
       await new Promise((resolve) => blocker.close(resolve));
     }
+    expect(mod.setup).toHaveBeenCalledOnce();
+    expect(mod.teardown).toHaveBeenCalledOnce();
+  });
+});
+
+describe('compose failure after modules were set up', () => {
+  it('tears down the modules that ran setup, then rethrows', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dash-comp-'));
+    const config = loadConfig({ NODE_ENV: 'test', DASH_DATA_DIR: join(root, 'd'), DASH_CONFIG_DIR: join(root, 'c'), DASH_PORT: '0' });
+    const db = openDb(':memory:');
+    migrateCore(db);
+    let broken = false;
+    const mod = serverFor('hooked', undefined, {
+      setup: vi.fn(() => {
+        broken = true;
+      }),
+      teardown: vi.fn(),
+    });
+    const boom = new Error('clock exploded');
+    await expect(
+      compose({
+        config,
+        db,
+        // The clock breaks once setup ran, so the failure happens after the modules were set up.
+        now: () => {
+          if (broken) throw boom;
+          return new Date('2026-11-12T10:00:00.000Z');
+        },
+        logger: silentLogger,
+        registry: [() => Promise.resolve({ default: mod })],
+      }),
+    ).rejects.toBe(boom);
     expect(mod.setup).toHaveBeenCalledOnce();
     expect(mod.teardown).toHaveBeenCalledOnce();
   });

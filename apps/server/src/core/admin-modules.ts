@@ -30,35 +30,49 @@ const hasConfig = (mod: LoadedModule): boolean =>
  * (the loader only runs `setup` for enabled modules): enabling it runs `setup(host)` first. If that throws, the module
  * stays disabled and is marked failed (like a load failure), the error is logged, and the request answers
  * 500 `internal` with the message "Module setup failed: <reason>", which the admin screen shows. A restart retries.
- * Setups in flight are tracked per module: a second enable awaits the same setup (it never runs twice), and a disable
- * that arrives mid-setup waits for it to settle, then disables and, if the setup succeeded, runs `teardown`.
+ * Enable and disable of one module are serialised on a per-module promise chain (`lifecycle.run`; errors do not
+ * break the chain): a setup never overlaps a teardown, a second enable finds the module already set up (setup never
+ * runs twice), and a disable that arrives while a setup is queued or running waits behind it, disables, and then
+ * runs `teardown` (so setup and teardown stay balanced).
  * `Stream.disconnectUser(user, module)` is deliberately not used: it mutes the module on open connections until they
  * reconnect, which would hide a re-enabled module.
  */
 export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModuleDeps): void {
   const { db, auth } = deps;
-  const inflight = new Map<string, Promise<void>>();
-  const ensureSetUp = (mod: LoadedModule): Promise<void> => {
-    if (mod.setupRan) return Promise.resolve();
-    let pending = inflight.get(mod.id);
-    if (!pending) {
-      pending = (async () => {
-        try {
-          await withTimeout(() => mod.server.setup?.(mod.host), SETUP_TIMEOUT_MS, 'setup');
-          mod.setupRan = true;
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          mod.enabled = false;
-          mod.failed = `setup failed: ${reason}`;
-          deps.logger.error({ module: mod.id, reason }, 'module setup failed on enable');
-          throw new DashError('internal', `Module setup failed: ${reason}`);
-        } finally {
-          inflight.delete(mod.id);
-        }
-      })();
-      inflight.set(mod.id, pending);
+  // One promise chain per module id: enable, disable and teardown of a module run strictly one after the other
+  // (a failure does not break the chain), so a setup never overlaps a teardown.
+  const chains = new Map<string, Promise<unknown>>();
+  const lifecycle = {
+    run<T>(moduleId: string, fn: () => Promise<T>): Promise<T> {
+      const result = (chains.get(moduleId) ?? Promise.resolve()).then(fn);
+      const tail = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      chains.set(moduleId, tail);
+      void tail.then(() => {
+        if (chains.get(moduleId) === tail) chains.delete(moduleId);
+      });
+      return result;
+    },
+  };
+  // Enables that are queued or running and may still run `setup`: a disable that finds one waits behind it and
+  // then tears the module down again.
+  const setupsQueued = new Map<string, number>();
+  const queued = (id: string): number => setupsQueued.get(id) ?? 0;
+
+  const ensureSetUp = async (mod: LoadedModule): Promise<void> => {
+    if (mod.setupRan) return;
+    try {
+      await withTimeout(() => mod.server.setup?.(mod.host), SETUP_TIMEOUT_MS, 'setup');
+      mod.setupRan = true;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      mod.enabled = false;
+      mod.failed = `setup failed: ${reason}`;
+      deps.logger.error({ module: mod.id, reason }, 'module setup failed on enable');
+      throw new DashError('internal', `Module setup failed: ${reason}`);
     }
-    return pending;
   };
 
   const find = (id: string): LoadedModule => {
@@ -111,19 +125,7 @@ export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModul
     return config;
   });
 
-  secured(app, auth, 'PUT', '/api/admin/modules/:id/enabled', async (user, req) => {
-    requireAdmin(user);
-    const mod = find((req.params as { id: string }).id);
-    const { enabled } = parseWith(EnabledBody, req.body);
-    if (enabled) {
-      await ensureSetUp(mod);
-    } else {
-      const pending = inflight.get(mod.id);
-      if (pending) {
-        await pending.catch(() => undefined); // a failed setup is reported to its own request
-        await teardownModule(mod, deps.logger);
-      }
-    }
+  const apply = (mod: LoadedModule, enabled: boolean, user: SessionUser, ip: string): { id: string; enabled: boolean } => {
     db.prepare(
       `INSERT INTO module_state (module_id, enabled) VALUES (?, ?)
        ON CONFLICT(module_id) DO UPDATE SET enabled = excluded.enabled`,
@@ -146,8 +148,35 @@ export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModul
       userId: user.id,
       action: enabled ? 'admin.module.enable' : 'admin.module.disable',
       detail: { moduleId: mod.id },
-      ip: req.ip,
+      ip,
     });
     return { id: mod.id, enabled };
+  };
+
+  secured(app, auth, 'PUT', '/api/admin/modules/:id/enabled', (user, req) => {
+    requireAdmin(user);
+    const mod = find((req.params as { id: string }).id);
+    const { enabled } = parseWith(EnabledBody, req.body);
+    if (enabled) {
+      const tracked = !mod.setupRan || queued(mod.id) > 0; // this enable may run `setup`
+      if (tracked) setupsQueued.set(mod.id, queued(mod.id) + 1);
+      return lifecycle.run(mod.id, async () => {
+        try {
+          await ensureSetUp(mod);
+        } finally {
+          if (tracked) {
+            if (queued(mod.id) > 1) setupsQueued.set(mod.id, queued(mod.id) - 1);
+            else setupsQueued.delete(mod.id);
+          }
+        }
+        return apply(mod, true, user, req.ip);
+      });
+    }
+    const midSetup = queued(mod.id) > 0; // a setup is queued or running: it ends up with a teardown
+    return lifecycle.run(mod.id, async () => {
+      const result = apply(mod, false, user, req.ip);
+      if (midSetup) await teardownModule(mod, deps.logger);
+      return result;
+    });
   });
 }

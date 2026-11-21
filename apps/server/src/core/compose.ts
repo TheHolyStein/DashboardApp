@@ -87,7 +87,6 @@ export async function compose(deps: ComposeDeps): Promise<Composed> {
   );
 
   // `stream` needs snapshots and auth, while snapshots and notifications need `stream` when they fire.
-  // eslint-disable-next-line prefer-const
   let stream: StreamService;
   const bus = createBus({ manifests, logger });
   const snapshots = createSnapshots({
@@ -127,56 +126,62 @@ export async function compose(deps: ComposeDeps): Promise<Composed> {
         now,
       }),
   });
-  modules.push(...loaded);
-  for (const mod of modules) wireModuleSubscriptions(bus, mod);
+  // Setup already ran inside loadModules: if anything below throws, tear those modules down before rethrowing.
+  try {
+    modules.push(...loaded);
+    for (const mod of modules) wireModuleSubscriptions(bus, mod);
 
-  const visibility = createVisibility(db, () => auth.listUsers().map((u) => u.id));
-  stream = createStream({ auth, snapshots, visibility, now, logger });
-  stream.sendCore('core:offline', { offline: false });
+    const visibility = createVisibility(db, () => auth.listUsers().map((u) => u.id));
+    stream = createStream({ auth, snapshots, visibility, now, logger });
+    stream.sendCore('core:offline', { offline: false });
 
-  // The scheduler flags a failed job's snapshot itself (job_ok = 0 → stale at send time).
-  const scheduler = createScheduler({
-    db,
-    now,
-    random: deps.random ?? Math.random,
-    instances: createInstanceReader(db),
-    logger,
-  });
-  for (const mod of modules) scheduler.register(mod);
+    // The scheduler flags a failed job's snapshot itself (job_ok = 0 → stale at send time).
+    const scheduler = createScheduler({
+      db,
+      now,
+      random: deps.random ?? Math.random,
+      instances: createInstanceReader(db),
+      logger,
+    });
+    for (const mod of modules) scheduler.register(mod);
 
-  const housekeeping = (): void => {
-    const at = now();
-    const steps: Array<[string, () => unknown]> = [
-      ['http cache', () => purgeExpiredCache(db, at)],
-      ['notifications', () => purgeOldNotifications(db, at)],
-      ['sessions', () => purgeExpiredSessions(db, at)],
-      ['login limiter', () => auth.loginLimiter.purge(at)],
-    ];
-    for (const [name, run] of steps) {
-      try {
-        const removed = run();
-        logger.info({ purge: name, ...(typeof removed === 'number' ? { removed } : {}) }, 'housekeeping');
-      } catch (err) {
-        logger.error({ purge: name, err: err instanceof Error ? err.message : String(err) }, 'housekeeping failed');
+    const housekeeping = (): void => {
+      const at = now();
+      const steps: Array<[string, () => unknown]> = [
+        ['http cache', () => purgeExpiredCache(db, at)],
+        ['notifications', () => purgeOldNotifications(db, at)],
+        ['sessions', () => purgeExpiredSessions(db, at)],
+        ['login limiter', () => auth.loginLimiter.purge(at)],
+      ];
+      for (const [name, run] of steps) {
+        try {
+          const removed = run();
+          logger.info({ purge: name, ...(typeof removed === 'number' ? { removed } : {}) }, 'housekeeping');
+        } catch (err) {
+          logger.error({ purge: name, err: err instanceof Error ? err.message : String(err) }, 'housekeeping failed');
+        }
       }
-    }
-  };
+    };
 
-  return {
-    auth,
-    modules,
-    stream,
-    scheduler,
-    snapshots,
-    notifications,
-    appDeps: {
+    return {
       auth,
       modules,
       stream,
       scheduler,
-      pagesApi: { scheduler, stream, snapshots, notifications, audit, now, logger },
-    },
-    housekeeping,
-    teardown: () => teardownModules(modules, logger),
-  };
+      snapshots,
+      notifications,
+      appDeps: {
+        auth,
+        modules,
+        stream,
+        scheduler,
+        pagesApi: { scheduler, stream, snapshots, notifications, audit, now, logger },
+      },
+      housekeeping,
+      teardown: () => teardownModules(modules, logger),
+    };
+  } catch (err) {
+    await teardownModules(loaded, logger);
+    throw err;
+  }
 }
