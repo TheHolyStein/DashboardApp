@@ -319,6 +319,53 @@ importers:
         specifier: ^7.4.1
         version: 7.4.1
 
+  modules/briefing:
+    dependencies:
+      '@dash/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
+      '@dash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      svelte:
+        specifier: ^5.57.3
+        version: 5.57.3(@typescript-eslint/types@8.72.2)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
+  modules/calendar:
+    dependencies:
+      '@dash/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
+      '@dash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      ical.js:
+        specifier: ^2.2.1
+        version: 2.2.1
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      svelte:
+        specifier: ^5.57.3
+        version: 5.57.3(@typescript-eslint/types@8.72.2)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
   modules/clock:
     dependencies:
       '@dash/contract':
@@ -337,6 +384,72 @@ importers:
       '@testing-library/svelte':
         specifier: ^5.4.2
         version: 5.4.2(svelte@5.57.3(@typescript-eslint/types@8.72.2))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))(vitest@5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)))
+      svelte:
+        specifier: ^5.57.3
+        version: 5.57.3(@typescript-eslint/types@8.72.2)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
+  modules/notifications:
+    dependencies:
+      '@dash/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
+      '@dash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      svelte:
+        specifier: ^5.57.3
+        version: 5.57.3(@typescript-eslint/types@8.72.2)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
+  modules/todo:
+    dependencies:
+      '@dash/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
+      '@dash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      svelte:
+        specifier: ^5.57.3
+        version: 5.57.3(@typescript-eslint/types@8.72.2)
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(jsdom@31.0.0(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.6)(typescript@6.0.3))(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
+  modules/weather:
+    dependencies:
+      '@dash/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+      '@dash/module-kit':
+        specifier: workspace:*
+        version: link:../../packages/module-kit
+      '@dash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
       svelte:
         specifier: ^5.57.3
         version: 5.57.3(@typescript-eslint/types@8.72.2)
@@ -3115,6 +3228,9 @@ packages:
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
     engines: {node: '>= 0.8'}
+
+  ical.js@2.2.1:
+    resolution: {integrity: sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg==}
 
   idb@7.1.1:
     resolution: {integrity: sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ==}
@@ -6964,6 +7080,8 @@ snapshots:
       setprototypeof: 1.2.0
       statuses: 2.0.2
       toidentifier: 1.0.1
+
+  ical.js@2.2.1: {}
 
   idb@7.1.1: {}
 
