@@ -1,20 +1,74 @@
 import { z } from 'zod';
 import { defineManifest } from '@dash/module-kit';
 
+/**
+ * Per-instance settings. The server has no access to a user's saved preferences, so the time zone that
+ * decides the greeting and what "today" means is a setting of the briefing itself.
+ */
+export const settings = z.object({
+  timeZone: z
+    .string()
+    .default('UTC')
+    .meta({ label: 'Time zone', widget: 'timezone', help: 'Decides the greeting and which day is "today". Use your own time zone.' }),
+});
+export type Settings = z.infer<typeof settings>;
+
+export type WeatherHint = {
+  key: 'rainAt' | 'dry' | 'hot' | 'frost' | 'storm' | 'pollenHigh';
+  vars: Record<string, string | number>;
+};
+
+/** What `compose` returns: the briefing of one user at one moment. Every section may be absent (empty or null). */
+export type Briefing = {
+  greeting: 'morning' | 'day' | 'evening' | 'night';
+  date: string;
+  next: { title: string; start: string; minutesUntil: number } | null;
+  eventsToday: number;
+  todos: { due: Array<{ title: string; list: string }>; overdue: number };
+  weatherHint: WeatherHint | null;
+  pins: Array<{ title: string }>;
+  alerts: Array<{ level: 'warn' | 'critical'; title: string }>;
+};
+
+/** What the server pushes to a user's instance. `epoch` names the server boot, `rev` rises with every change of the briefing. */
+export type Snapshot = Briefing & { epoch: string; rev: number };
+
+export type AgendaEvent = { uid: string; title: string; start: string; end: string; allDay: boolean };
+
+/** The body of `GET /day`: the caller's agenda for today and tomorrow plus all due todos, at `{ epoch, rev }`. */
+export type DayDetail = {
+  epoch: string;
+  rev: number;
+  date: string;
+  today: AgendaEvent[];
+  tomorrow: AgendaEvent[];
+  todos: { due: Array<{ title: string; list: string }>; overdue: number };
+  alerts: Array<{ level: 'warn' | 'critical'; title: string }>;
+};
+
 export default defineManifest({
   id: 'briefing',
   name: 'Briefing',
-  description: 'TODO: one sentence about what Briefing shows.',
+  description: 'Your day in one glance: next event, due todos, weather hint, pins and alerts.',
   version: '0.1.0',
   icon: 'note',
-  scope: 'shared',
+  scope: 'user',
   multiInstance: false,
-  tile: { default: { w: 3, h: 2 }, min: { w: 2, h: 1 }, max: { w: 6, h: 4 } },
-  settings: z.object({}),
+  tile: { default: { w: 6, h: 2 }, min: { w: 3, h: 1 }, max: { w: 12, h: 4 } },
+  settings,
   config: z.object({}),
-  levels: ['view', 'edit'],
-  jobs: [],
+  levels: ['view'],
+  jobs: [{ name: 'compose', intervalSec: 60, mode: 'whenViewed', per: 'module' }],
   publishes: [],
-  subscribes: [],
+  subscribes: [
+    'calendar.day.summary',
+    'calendar.event.upcoming',
+    'todo.day.summary',
+    'weather.updated',
+    'pin.request',
+    'notification.created',
+    'net.connectivity.changed',
+    'nas.health.changed',
+  ],
   outbound: [],
 });
