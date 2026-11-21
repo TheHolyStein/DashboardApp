@@ -1,7 +1,21 @@
 {
+  "rev": 5,
   "timers": [
-    { "id": "6f1c1d0e-0b7a-4c52-9a43-2f6d6d0a1001", "label": "Pasta", "endsAt": "2026-01-01T12:09:30.000Z", "durationSec": 600 },
-    { "id": "6f1c1d0e-0b7a-4c52-9a43-2f6d6d0a1002", "label": "Laundry", "endsAt": "2026-01-01T12:45:00.000Z", "durationSec": 2700 }
+    {
+      "id": "6f1c1d0e-0b7a-4c52-9a43-2f6d6d0a1001",
+      "label": "Pasta",
+      "endsAt": "2026-01-01T12:09:30.000Z",
+      "durationSec": 600
+    },
+    {
+      "id": "6f1c1d0e-0b7a-4c52-9a43-2f6d6d0a1002",
+      "label": "Laundry",
+      "endsAt": "2026-01-01T12:45:00.000Z",
+      "durationSec": 2700
+    }
   ],
-  "nextEvent": { "title": "Team standup", "start": "2026-01-01T12:25:00.000Z" }
+  "nextEvent": {
+    "title": "Team standup",
+    "start": "2026-01-01T12:25:00.000Z"
+  }
 }

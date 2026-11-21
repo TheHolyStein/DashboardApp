@@ -4,12 +4,11 @@
   import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { DashError, type DetailProps } from '@dash/contract';
   import { Button, Empty, Field, serial } from '@dash/ui';
-  import type { Settings, Snapshot } from '../manifest.js';
+  import type { Settings, Snapshot, TimerList } from '../manifest.js';
   import { formatRemaining, formatStopwatch, formatTime } from './format.js';
   import { createStopwatch } from './stopwatch.svelte.js';
   import { useNow } from './useNow.svelte.js';
 
-  type Timer = Snapshot['timers'][number];
   type Props = DetailProps<Snapshot, Settings> & {
     /** Millisecond clock for the stopwatch; defaults to `performance.now()`. Tests inject their own. */
     clock?: () => number;
@@ -23,7 +22,10 @@
   // Zones are not part of the snapshot: they load through GET /zones.
   let zones = $state<string[]>([]);
   let zonesLoaded = $state(false);
-  let timers = $state<Timer[]>(untrack(() => data?.timers ?? []));
+  // The one source of truth for the timer list. Every list that arrives (snapshot push, GET, POST or DELETE
+  // response) goes through `applyList`, which keeps only data at least as new as what is held.
+  let list = $state.raw<TimerList>(untrack(() => ({ rev: data?.rev ?? -1, timers: data?.timers ?? [] })));
+  const timers = $derived(list.timers);
   let error = $state('');
   let zonesHeading = $state<HTMLElement>();
   let timersHeading = $state<HTMLElement>();
@@ -40,20 +42,23 @@
     heading?.focus();
   }
 
-  // A pushed snapshot replaces the list, then GET /timers settles it: a snapshot built before our own change can
-  // arrive after it, and the server's list is the one to trust. The first run is covered by the fetch on open.
-  let firstSnapshot = true;
+  function applyList(incoming: TimerList): void {
+    if (incoming.rev >= list.rev) list = { rev: incoming.rev, timers: incoming.timers };
+  }
+
   $effect(() => {
-    if (!data?.timers) return;
-    timers = data.timers;
-    if (firstSnapshot) firstSnapshot = false;
-    else void untrack(() => api.get<Timer[]>('/timers')).then((list) => (timers = list), () => undefined);
+    if (data) untrack(() => applyList(data));
   });
+
+  /** Reads the list again; an answer that is older than what the pane holds is simply ignored. */
+  function loadTimers(): void {
+    api.get<TimerList>('/timers').then(applyList, () => (error = t('m.clock.loadFailed', 'Could not load the saved data.')));
+  }
 
   onMount(() => {
     api.get<string[]>('/zones').then(
-      (list) => {
-        zones = list;
+      (saved) => {
+        zones = saved;
         zonesLoaded = true;
       },
       () => {
@@ -61,10 +66,13 @@
         error = t('m.clock.loadFailed', 'Could not load the saved data.');
       },
     );
-    api.get<Timer[]>('/timers').then(
-      (list) => (timers = list),
-      () => (error = t('m.clock.loadFailed', 'Could not load the saved data.')),
-    );
+    loadTimers();
+    // Pushes may have been missed while the page was hidden.
+    const onVisible = (): void => {
+      if (!document.hidden) loadTimers();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   });
 
   // Second resolution only while a timer counts down.
@@ -137,9 +145,7 @@
     error = '';
     creating = true;
     try {
-      const created = await api.post<Timer>('/timers', { label: label.trim(), durationSec });
-      // The pushed snapshot may already have delivered it.
-      timers = [...timers.filter((x) => x.id !== created.id), created].sort((a, b) => a.endsAt.localeCompare(b.endsAt));
+      applyList(await api.post<TimerList>('/timers', { label: label.trim(), durationSec }));
       label = '';
     } catch (err) {
       error = failure(err);
@@ -152,8 +158,7 @@
     cancelling[id] = true;
     error = '';
     try {
-      await api.delete(`/timers/${id}`);
-      timers = timers.filter((x) => x.id !== id);
+      applyList(await api.delete<TimerList>(`/timers/${id}`));
       await focusAfterRemoval(timersHeading);
     } catch (err) {
       error = failure(err);

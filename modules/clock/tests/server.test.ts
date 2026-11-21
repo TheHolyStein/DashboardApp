@@ -3,7 +3,7 @@ import type { ModuleInstance } from '@dash/contract';
 import { createMockHostWithSetup, createMockRouter, runServerContractSuite } from '@dash/module-kit/testing';
 import server from '../server/index.js';
 import { MAX_ACTIVE, createTimer, dueTimers, listTimers, markFired, purgeFired } from '../server/timers.js';
-import type { Snapshot } from '../manifest.js';
+import type { Snapshot, TimerList } from '../manifest.js';
 
 runServerContractSuite(server, { moduleDir: import.meta.dirname + '/..' });
 
@@ -375,17 +375,23 @@ describe('routes', () => {
     createTimer(db, 'u2', { label: 'theirs', durationSec: 60 }, START);
     const res = await router.call('GET', '/timers', { level: 'view' });
     expect(res.status).toBe(200);
-    expect((res.body as Snapshot["timers"]).map((t) => ({ label: t.label, endsAt: t.endsAt, durationSec: t.durationSec }))).toEqual([
+    const body = res.body as TimerList;
+    expect(body.timers.map((t) => ({ label: t.label, endsAt: t.endsAt, durationSec: t.durationSec }))).toEqual([
       { label: 'mine', endsAt: '2026-01-01T12:01:00.000Z', durationSec: 60 },
     ]);
+    expect(body.rev).toBe(0); // nothing changed through the module yet
   });
 
   test('POST creates and pushes updated snapshot', async () => {
     const { host, router, pushedTo } = await setup();
     const res = await router.call('POST', '/timers', { level: 'edit', body: { label: 'Eggs', durationSec: 420 } });
     expect(res.status).toBe(200);
-    const created = res.body as { id: string };
-    expect(res.body).toMatchObject({ label: 'Eggs', durationSec: 420, endsAt: '2026-01-01T12:07:00.000Z' });
+    const { rev, timers } = res.body as TimerList;
+    const created = timers[0]!;
+    expect(timers).toHaveLength(1);
+    expect(created).toMatchObject({ label: 'Eggs', durationSec: 420, endsAt: '2026-01-01T12:07:00.000Z' });
+    expect(rev).toBe(1);
+    expect(pushedTo('i1').map((p) => (p.data as Snapshot).rev)).toEqual([1]);
     for (const id of ['i1', 'i3']) {
       expect(pushedTo(id).map((p) => (p.data as Snapshot).timers.map((t) => t.id))).toEqual([[created.id]]);
     }
@@ -413,8 +419,8 @@ describe('routes', () => {
     const { host, router, db } = await setup();
     const t = createTimer(db, 'u1', { label: 'mine', durationSec: 60 }, START);
     const res = await router.call('DELETE', `/timers/${t.id}`, { level: 'edit' });
-    expect(res.status).toBe(204); // the mock router answers 204 for undefined, like the real one
-    expect(res.body).toBeUndefined();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ rev: 1, timers: [] }); // the caller's full current list, not 204
     expect(listTimers(db, 'u1', START)).toEqual([]);
     expect(host.pushed.map((p) => p.instanceId).sort()).toEqual(['i1', 'i3']);
   });
@@ -470,5 +476,51 @@ describe('zones routes', () => {
   test('PUT /zones needs level edit', async () => {
     const { router } = await setup();
     expect((await router.call('PUT', '/zones', { level: 'view', body: { zones: [] } })).status).toBe(403);
+  });
+});
+
+describe('revision ordering', () => {
+  const body = async (router: Awaited<ReturnType<typeof setup>>['router'], method: string, path: string, req: Parameters<typeof router.call>[2]) =>
+    (await router.call(method, path, req)).body as TimerList;
+
+  test('every create, delete and fire raises the owner rev; other owners are untouched', async () => {
+    const { host, router, tick } = await setup();
+    const a = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'a', durationSec: 60 } });
+    const b = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'b', durationSec: 5 } });
+    expect([a.rev, b.rev]).toEqual([1, 2]);
+    const del = await body(router, 'DELETE', `/timers/${a.timers[0]!.id}`, { level: 'edit' });
+    expect(del.rev).toBe(3);
+    expect(del.timers.map((t) => t.label)).toEqual(['b']);
+    host.advance(5_000);
+    await tick(); // b fires
+    const after = await body(router, 'GET', '/timers', { level: 'view' });
+    expect(after).toEqual({ rev: 4, timers: [] });
+    expect((await body(router, 'GET', '/timers', { level: 'view', user: { id: 'u2' } })).rev).toBe(0);
+  });
+
+  test('a GET is stamped with the rev of the list it carries', async () => {
+    const { router } = await setup();
+    const created = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'a', durationSec: 60 } });
+    expect(await body(router, 'GET', '/timers', { level: 'view' })).toEqual(created);
+  });
+
+  test('a next event raises the owner rev and the pushed snapshot carries it', async () => {
+    const { host, pushedTo } = await setup();
+    await server.on!['calendar.event.upcoming']!(
+      { uid: 'e', title: 'Dentist', start: '2026-01-01T12:30:00.000Z', minutesUntil: 30, userIds: ['u1'] },
+      host,
+    );
+    expect((pushedTo('i1')[0]!.data as Snapshot).rev).toBe(1);
+  });
+
+  test('rev survives a restart: a new setup over the same store continues above the old value', async () => {
+    const { host, router } = await setup();
+    await router.call('POST', '/timers', { level: 'edit', body: { label: 'a', durationSec: 60 } });
+    const last = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'b', durationSec: 60 } });
+    expect(last.rev).toBe(2);
+    await server.setup!(host); // restart: the in-memory counters are gone, the store stays
+    const next = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'c', durationSec: 60 } });
+    expect(next.rev).toBe(3);
+    expect(await host.store.get('rev:u1')).toBe(3);
   });
 });

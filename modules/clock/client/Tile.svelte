@@ -2,13 +2,22 @@
   // Clock tile. Needs-setup state: not applicable, the clock needs no configuration, and it keeps
   // showing the time with `data` undefined (the snapshot only adds timers and the next event).
   // Nothing in the tile is interactive: the shell's tile frame opens the detail pane.
-  import { getContext, type Component } from 'svelte';
+  import { getContext, untrack, type Component } from 'svelte';
   import { THEME_CONTEXT_KEY, type ClockFaceProps, type ThemeSeam, type TileProps } from '@dash/contract';
   import type { Settings, Snapshot } from '../manifest.js';
   import { formatDate, formatRemaining, formatTime } from './format.js';
   import { useNow } from './useNow.svelte.js';
 
-  let { data, settings, size, mode, t, locale, timeZone: userTimeZone }: TileProps<Snapshot, Settings> = $props();
+  let { data: pushed, settings, size, mode, t, locale, timeZone: userTimeZone }: TileProps<Snapshot, Settings> = $props();
+
+  // A snapshot older than the one on screen (a late or reordered push) is ignored.
+  let data = $state.raw<Snapshot | undefined>(untrack(() => pushed));
+  $effect.pre(() => {
+    const next = pushed;
+    untrack(() => {
+      if (next && (!data || next.rev >= data.rev)) data = next;
+    });
+  });
 
   /** The shell's theme seam (absent in module tests and when no theme is active). */
   const theme = getContext<ThemeSeam | undefined>(THEME_CONTEXT_KEY);

@@ -13,11 +13,21 @@ export const settings = z.object({
 });
 export type Settings = z.infer<typeof settings>;
 
-/** What the server pushes to each placed instance (per owner, not module-wide). */
+type WireTimer = { id: string; label: string; endsAt: string; durationSec: number };
+
+/**
+ * What the server pushes to each placed instance (per owner, not module-wide). `rev` is the owner's revision:
+ * it rises with every change to their timers or next event, so a client applies only data at least as new as
+ * the newest it has seen.
+ */
 export type Snapshot = {
-  timers: Array<{ id: string; label: string; endsAt: string; durationSec: number }>;
+  rev: number;
+  timers: WireTimer[];
   nextEvent: { title: string; start: string } | null;
 };
+
+/** The body of `GET /timers`, `POST /timers` and `DELETE /timers/:id`: the caller's full list at revision `rev`. */
+export type TimerList = { rev: number; timers: WireTimer[] };
 
 export default defineManifest({
   id: 'clock',

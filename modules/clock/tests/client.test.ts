@@ -10,7 +10,7 @@ import client from '../client/index.js';
 import Face from './Face.svelte';
 import { reactiveTheme } from './theme.svelte.js';
 import UseNowProbe from './UseNowProbe.svelte';
-import { settings as settingsSchema, type Settings, type Snapshot } from '../manifest.js';
+import { settings as settingsSchema, type Settings, type Snapshot, type TimerList } from '../manifest.js';
 
 const moduleDir = import.meta.dirname + '/..';
 runClientContractSuite(client, { moduleDir, tileFixture: 'tile', detailFixture: 'detail' });
@@ -28,7 +28,7 @@ const timer = (id: string, label: string, secondsLeft: number) => ({
 
 function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps<Snapshot, Settings> {
   return {
-    data: { timers: [], nextEvent: null },
+    data: { rev: 1, timers: [], nextEvent: null },
     updatedAt: START,
     stale: false,
     settings,
@@ -57,7 +57,7 @@ afterEach(() => {
 describe('Tile', () => {
   test('tile shows countdown "in 25 min" for nextEvent 25 minutes ahead', () => {
     const nextEvent = { title: 'Standup', start: new Date(Date.parse(START) + 25 * 60_000).toISOString() };
-    render(client.Tile, { props: tileProps({ data: { timers: [], nextEvent } }) });
+    render(client.Tile, { props: tileProps({ data: { rev: 1, timers: [], nextEvent } }) });
     expect(screen.getByText('in 25 min')).toBeTruthy();
     expect(screen.getByText('Standup')).toBeTruthy();
   });
@@ -65,12 +65,12 @@ describe('Tile', () => {
   test('countdown wording: 1 min, hours, now, and hidden when showNextEvent is off', () => {
     const at = (min: number) => ({ title: 'E', start: new Date(Date.parse(START) + min * 60_000).toISOString() });
     for (const [min, text] of [[1, 'in 1 min'], [120, 'in 2 h'], [60, 'in 1 h'], [-1, 'now']] as const) {
-      const { unmount } = render(client.Tile, { props: tileProps({ data: { timers: [], nextEvent: at(min) } }) });
+      const { unmount } = render(client.Tile, { props: tileProps({ data: { rev: 1, timers: [], nextEvent: at(min) } }) });
       expect(screen.getByText(text)).toBeTruthy();
       unmount();
     }
     render(client.Tile, {
-      props: tileProps({ data: { timers: [], nextEvent: at(25) }, settings: { ...settings, showNextEvent: false } }),
+      props: tileProps({ data: { rev: 1, timers: [], nextEvent: at(25) }, settings: { ...settings, showNextEvent: false } }),
     });
     expect(screen.queryByText('in 25 min')).toBeNull();
   });
@@ -89,7 +89,7 @@ describe('Tile', () => {
   test('timer labels, the tile label and the event title are marked as user content', () => {
     const nextEvent = { title: 'Standup', start: new Date(Date.parse(START) + 25 * 60_000).toISOString() };
     const { container } = render(client.Tile, {
-      props: tileProps({ data: { timers: [timer('a', 'Tea', 60)], nextEvent }, settings: { ...settings, label: 'Home' } }),
+      props: tileProps({ data: { rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent }, settings: { ...settings, label: 'Home' } }),
     });
     const user = [...container.querySelectorAll('[data-user]')].map((e) => e.textContent);
     expect(user.sort()).toEqual(['Home', 'Standup', 'Tea']);
@@ -119,7 +119,7 @@ describe('Tile', () => {
 
   test('the tile has no interactive content: the shell frame opens the detail pane', () => {
     const { container } = render(client.Tile, {
-      props: tileProps({ data: { timers: [timer('a', 'Tea', 60)], nextEvent: fixture.nextEvent } }),
+      props: tileProps({ data: { rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent: fixture.nextEvent } }),
     });
     expect(container.querySelector('button, a, input, select, textarea, [tabindex], [role=button]')).toBeNull();
   });
@@ -168,9 +168,18 @@ describe('Tile', () => {
     expect(dateFormatter({ timeZone: 'UTC' }, 'en')).not.toBe(dateFormatter({ timeZone: 'UTC' }, 'de'));
   });
 
+  test('a snapshot with an older rev than the one shown is ignored by the tile, a newer one applies', async () => {
+    const { rerender } = render(client.Tile, { props: tileProps({ data: { rev: 5, timers: [timer('a', 'Tea', 60)], nextEvent: null } }) });
+    expect(screen.getByText('Tea')).toBeTruthy();
+    await rerender(tileProps({ data: { rev: 4, timers: [], nextEvent: null } }));
+    expect(screen.getByText('Tea')).toBeTruthy();
+    await rerender(tileProps({ data: { rev: 6, timers: [], nextEvent: null } }));
+    expect(screen.queryByText('Tea')).toBeNull();
+  });
+
   test('"+1" is shown with three timers and only two are listed', () => {
     const timers = [timer('a', 'Tea', 60), timer('b', 'Eggs', 120), timer('c', 'Bread', 180)];
-    render(client.Tile, { props: tileProps({ data: { timers, nextEvent: null } }) });
+    render(client.Tile, { props: tileProps({ data: { rev: 1, timers, nextEvent: null } }) });
     expect(screen.getByText('+1')).toBeTruthy();
     expect(screen.getByText('Tea')).toBeTruthy();
     expect(screen.getByText('Eggs')).toBeTruthy();
@@ -179,7 +188,7 @@ describe('Tile', () => {
 
   test('at the minimum size (2x1) only the face is shown', () => {
     const timers = [timer('a', 'Tea', 60)];
-    render(client.Tile, { props: tileProps({ size: { w: 2, h: 1 }, data: { timers, nextEvent: fixture.nextEvent } }) });
+    render(client.Tile, { props: tileProps({ size: { w: 2, h: 1 }, data: { rev: 1, timers, nextEvent: fixture.nextEvent } }) });
     expect(screen.queryByText('Tea')).toBeNull();
     expect(screen.queryByText('Team standup')).toBeNull();
     expect(screen.getByText('12:00')).toBeTruthy();
@@ -187,7 +196,7 @@ describe('Tile', () => {
 
   test('ticks per second while a timer is running even if showSeconds is false', async () => {
     const timers = [timer('a', 'Tea', 90)];
-    render(client.Tile, { props: tileProps({ data: { timers, nextEvent: null } }) });
+    render(client.Tile, { props: tileProps({ data: { rev: 1, timers, nextEvent: null } }) });
     expect(screen.getByText('1:30')).toBeTruthy();
     await vi.advanceTimersByTimeAsync(1000);
     expect(screen.getByText('1:29')).toBeTruthy();
@@ -264,14 +273,17 @@ describe('useNow', () => {
 
 describe('Detail', () => {
   const detailData = loadFixture<Snapshot>(moduleDir, 'detail');
+  const detailList = { rev: detailData.rev, timers: detailData.timers };
   const ZONES = ['Europe/Berlin', 'America/New_York', 'Asia/Tokyo']; // GET /zones, not part of a snapshot
   const emptyApi = (over: Partial<ModuleApi> = {}): ModuleApi =>
     ({
-      get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ZONES : detailData.timers)),
+      get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ZONES : detailList)),
       post: vi.fn(),
       put: vi.fn(),
       patch: vi.fn(),
-      delete: vi.fn(() => Promise.resolve(undefined)),
+      delete: vi.fn((path: string) =>
+        Promise.resolve({ rev: detailData.rev + 1, timers: detailData.timers.filter((x) => path !== `/timers/${x.id}`) }),
+      ),
       ...over,
     }) as unknown as ModuleApi;
   const props = (over: Record<string, unknown> = {}) => ({
@@ -308,8 +320,8 @@ describe('Detail', () => {
 
   test('creating a timer posts label and duration, cancelling deletes', async () => {
     const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
-    const post = vi.fn(() => Promise.resolve(created));
-    const del = vi.fn(() => Promise.resolve(undefined));
+    const post = vi.fn(() => Promise.resolve({ rev: 6, timers: [...detailData.timers, created] }));
+    const del = vi.fn(() => Promise.resolve({ rev: 7, timers: detailData.timers }));
     const api = emptyApi({ post: post as ModuleApi['post'], delete: del as ModuleApi['delete'] });
     const { container } = render(client.Detail, { props: props({ api }) });
     await vi.advanceTimersByTimeAsync(0);
@@ -358,7 +370,9 @@ describe('Detail', () => {
 
   test('a double click on Cancel sends one request and the button is busy meanwhile', async () => {
     let finish: () => void = () => undefined;
-    const del = vi.fn(() => new Promise<undefined>((resolve) => (finish = () => resolve(undefined))));
+    const del = vi.fn(
+      () => new Promise<TimerList>((resolve) => (finish = () => resolve({ rev: 6, timers: detailData.timers.slice(1) }))),
+    );
     render(client.Detail, { props: props({ api: emptyApi({ delete: del as ModuleApi['delete'] }) }) });
     await vi.advanceTimersByTimeAsync(0);
     const button = screen.getByRole('button', { name: 'Cancel Pasta' });
@@ -380,7 +394,7 @@ describe('Detail', () => {
     await fireEvent.submit(form);
     await fireEvent.submit(form);
     expect(post).toHaveBeenCalledTimes(1);
-    finish({ id: 'n', label: '', endsAt: new Date(Date.parse(START) + 300_000).toISOString(), durationSec: 300 });
+    finish({ rev: 6, timers: [] });
     await vi.advanceTimersByTimeAsync(0);
   });
 
@@ -427,7 +441,7 @@ describe('Detail', () => {
 
   test('the zone list shows a loading state until GET /zones answers, then the list', async () => {
     let answer: (list: string[]) => void = () => undefined;
-    const get = vi.fn((path: string) => (path === '/zones' ? new Promise<string[]>((r) => (answer = r)) : Promise.resolve(detailData.timers)));
+    const get = vi.fn((path: string) => (path === '/zones' ? new Promise<string[]>((r) => (answer = r)) : Promise.resolve(detailList)));
     render(client.Detail, { props: props({ api: emptyApi({ get: get as ModuleApi['get'] }) }) });
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.queryByText('No world clocks yet.')).toBeNull();
@@ -439,41 +453,93 @@ describe('Detail', () => {
   });
 
   test('world clocks use the user locale; timer labels are user content', async () => {
-    const get = vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Asia/Kolkata'] : detailData.timers));
+    const get = vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Asia/Kolkata'] : detailList));
     const { container } = render(client.Detail, { props: props({ locale: 'de-DE', timeZone: 'Asia/Kolkata', api: emptyApi({ get: get as ModuleApi['get'] }) }) });
     await vi.advanceTimersByTimeAsync(0);
     expect(container.querySelector('.zones time')?.textContent).toBe('17:30');
     expect(container.querySelectorAll('.name [data-user]').length).toBeGreaterThan(0);
   });
 
-  test('a pushed snapshot that is older than our own change is corrected by the server list', async () => {
+  describe('ordering by rev', () => {
     const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
-    const api = emptyApi({
-      get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ZONES : [...detailData.timers, created])) as ModuleApi['get'],
-      post: vi.fn(() => Promise.resolve(created)) as ModuleApi['post'],
-    });
-    const { container, rerender } = render(client.Detail, { props: props({ api }) });
-    await vi.advanceTimersByTimeAsync(0);
-    await fireEvent.input(container.querySelector('input[name=label]')!, { target: { value: 'Tea' } });
-    await fireEvent.submit(container.querySelector('form')!);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
-    await rerender(props({ api, data: { ...detailData, timers: detailData.timers.slice(0, 1) } })); // a stale push
-    await vi.advanceTimersByTimeAsync(0);
-    expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
-  });
+    const withTea = (rev: number) => ({ rev, timers: [...detailData.timers, created] });
+    const defer = <T,>() => {
+      let resolve: (v: T) => void = () => undefined;
+      const promise = new Promise<T>((r) => (resolve = r));
+      return { promise, resolve };
+    };
+    const submit = async (container: HTMLElement) => {
+      await fireEvent.submit(container.querySelector('form')!);
+      await vi.advanceTimersByTimeAsync(0);
+    };
 
-  test('a snapshot that already holds the created timer does not show it twice', async () => {
-    const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
-    let answer: (t: typeof created) => void = () => undefined;
-    const api = emptyApi({ post: vi.fn(() => new Promise<typeof created>((resolve) => (answer = resolve))) as ModuleApi['post'] });
-    const { container, rerender } = render(client.Detail, { props: props({ api }) });
-    await vi.advanceTimersByTimeAsync(0);
-    await fireEvent.submit(container.querySelector('form')!);
-    await rerender(props({ api, data: { ...detailData, timers: [...detailData.timers, created] } })); // the push beats the response
-    answer(created);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(screen.getAllByRole('button', { name: 'Cancel Tea' })).toHaveLength(1);
+    test('a GET that resolves after a POST response with an older rev does not drop the new timer', async () => {
+      const lateGet = defer<TimerList>();
+      let timersGets = 0;
+      const get = vi.fn((path: string) => (path === '/zones' ? Promise.resolve(ZONES) : ++timersGets === 1 ? lateGet.promise : Promise.resolve(detailList)));
+      const post = vi.fn(() => Promise.resolve(withTea(6)));
+      const api = emptyApi({ get: get as ModuleApi['get'], post: post as ModuleApi['post'] });
+      const { container } = render(client.Detail, { props: props({ api }) });
+      await vi.advanceTimersByTimeAsync(0);
+      await submit(container);
+      expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
+      lateGet.resolve({ rev: detailData.rev, timers: detailData.timers }); // issued before the POST, answered after it
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
+    });
+
+    test('a GET that resolves after a DELETE response does not bring the timer back', async () => {
+      const lateGet = defer<TimerList>();
+      const get = vi.fn((path: string) => (path === '/zones' ? Promise.resolve(ZONES) : lateGet.promise));
+      const api = emptyApi({ get: get as ModuleApi['get'] });
+      // The pane opens from a snapshot at rev 5; its own GET is still in flight.
+      render(client.Detail, { props: props({ api }) });
+      await vi.advanceTimersByTimeAsync(0);
+      await fireEvent.click(screen.getByRole('button', { name: 'Cancel Pasta' }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByRole('button', { name: 'Cancel Pasta' })).toBeNull();
+      lateGet.resolve(detailList); // rev 5: older than the DELETE response (rev 6)
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByRole('button', { name: 'Cancel Pasta' })).toBeNull();
+    });
+
+    test('two overlapping GETs resolving out of order keep the newer list', async () => {
+      const first = defer<TimerList>();
+      const second = defer<TimerList>();
+      let timersGets = 0;
+      const get = vi.fn((path: string) => (path === '/zones' ? Promise.resolve(ZONES) : ++timersGets === 1 ? first.promise : second.promise));
+      const api = emptyApi({ get: get as ModuleApi['get'] });
+      render(client.Detail, { props: props({ api }) });
+      await vi.advanceTimersByTimeAsync(0);
+      document.dispatchEvent(new Event('visibilitychange')); // the pane reads again when it becomes visible: a second GET in flight
+      await vi.advanceTimersByTimeAsync(0);
+      expect(timersGets).toBe(2);
+      second.resolve(withTea(9));
+      await vi.advanceTimersByTimeAsync(0);
+      first.resolve({ rev: 8, timers: detailData.timers });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
+    });
+
+    test('a snapshot push with an older rev is ignored by the pane, a newer one applies', async () => {
+      const { rerender } = render(client.Detail, { props: props({ data: { ...detailData, rev: 7, timers: detailData.timers.slice(0, 1) } }) });
+      await vi.advanceTimersByTimeAsync(0);
+      // the open-time GET answers rev 5, older than the pushed rev 7: ignored
+      expect(screen.queryByRole('button', { name: 'Cancel Laundry' })).toBeNull();
+      await rerender(props({ data: { ...detailData, rev: 6 } })); // older push
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByRole('button', { name: 'Cancel Laundry' })).toBeNull();
+      await rerender(props({ data: { ...detailData, rev: 8 } })); // newer push
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('button', { name: 'Cancel Laundry' })).toBeTruthy();
+    });
+
+    test('a failed GET shows an error line', async () => {
+      const get = vi.fn((path: string) => (path === '/zones' ? Promise.resolve(ZONES) : Promise.reject(new Error('offline'))));
+      render(client.Detail, { props: props({ api: emptyApi({ get: get as ModuleApi['get'] }) }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('alert').textContent).toContain('Could not load');
+    });
   });
 
   test('focus moves to the list heading after removing a zone or cancelling a timer', async () => {
@@ -501,7 +567,7 @@ describe('Detail', () => {
   test('a saved zone the runtime does not know renders in UTC instead of crashing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const api = emptyApi({ get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Mars/Base'] : [])) as ModuleApi['get'] });
-    render(client.Detail, { props: props({ api, data: { timers: [], nextEvent: null } }) });
+    render(client.Detail, { props: props({ api, data: { rev: 1, timers: [], nextEvent: null } }) });
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.getByText('Mars/Base')).toBeTruthy();
     expect(screen.getByText('12:00')).toBeTruthy();

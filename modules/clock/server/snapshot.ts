@@ -7,10 +7,10 @@ export interface NextEvent { title: string; start: string }
 
 export const nextKey = (userId: UserId): string => `next:${userId}`;
 
-export async function buildSnapshot(host: HostServices, ownerId: UserId): Promise<Snapshot> {
-  const timers = listTimers(host.store.db, ownerId, host.now()).map(toWire);
+/** `rev` and the timer list are read together after the last await, so they always describe the same moment. */
+export async function buildSnapshot(host: HostServices, ownerId: UserId, revOf: (owner: UserId) => number): Promise<Snapshot> {
   const nextEvent = (await host.store.get<NextEvent>(nextKey(ownerId))) ?? null;
-  return { timers, nextEvent };
+  return { rev: revOf(ownerId), timers: listTimers(host.store.db, ownerId, host.now()).map(toWire), nextEvent };
 }
 
 /**
@@ -22,12 +22,13 @@ export async function pushSnapshots(
   host: HostServices,
   pusher: SnapshotPusher,
   instances: ModuleInstance[],
+  revOf: (owner: UserId) => number,
   signal?: AbortSignal,
 ): Promise<void> {
   if (instances.length === 0) return;
   const wait = <T>(p: Promise<T>): Promise<T> => (signal ? abortable(signal, p) : p);
   const built: Array<[ModuleInstance, Snapshot]> = [];
-  for (const instance of instances) built.push([instance, await wait(buildSnapshot(host, instance.ownerId))]);
+  for (const instance of instances) built.push([instance, await wait(buildSnapshot(host, instance.ownerId, revOf))]);
   const live = new Set((await wait(host.instances())).map((i) => i.id));
   for (const [instance, snapshot] of built) if (live.has(instance.id)) pusher.push(instance.id, snapshot);
 }
