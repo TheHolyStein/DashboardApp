@@ -22,7 +22,7 @@
     if (!id) return null;
     for (const p of pages.list) {
       const i = p.instances.find((x) => x.id === id);
-      if (i) return grantLevel(session.me?.grants, i.moduleId) ? i : null;
+      if (i) return grantLevel(session.me?.grants, i.moduleId) ? { ...i, isOwner: p.ownerId === session.me?.id } : null;
     }
     return null;
   });
@@ -57,7 +57,7 @@
     {:then loaded}
       {@const Body = loaded.client.Detail}
       <svelte:boundary>
-        <Body {...baseProps(found, mode)} params={detail.current?.params ?? {}} close={() => detail.close()} />
+        <Body {...baseProps(found, mode, found.isOwner)} params={detail.current?.params ?? {}} close={() => detail.close()} />
         {#snippet failed(error, reset)}
           {@render failure(reset, error)}
         {/snippet}

@@ -17,6 +17,7 @@ runClientContractSuite(client, { moduleDir, tileFixture: 'tile', detailFixture: 
 
 const START = '2026-01-01T12:00:00.000Z';
 const fixture = loadFixture<Snapshot>(moduleDir, 'tile');
+const EPOCH = fixture.epoch;
 const settings: Settings = settingsSchema.parse({ timeZone: 'UTC' });
 
 const timer = (id: string, label: string, secondsLeft: number) => ({
@@ -28,7 +29,7 @@ const timer = (id: string, label: string, secondsLeft: number) => ({
 
 function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps<Snapshot, Settings> {
   return {
-    data: { rev: 1, timers: [], nextEvent: null },
+    data: { epoch: EPOCH, rev: 1, timers: [], nextEvent: null },
     updatedAt: START,
     stale: false,
     settings,
@@ -39,6 +40,7 @@ function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps
     t: identityT,
     locale: 'en',
     timeZone: 'UTC',
+    isOwner: true,
     openDetail: () => undefined,
     ...over,
   };
@@ -57,7 +59,7 @@ afterEach(() => {
 describe('Tile', () => {
   test('tile shows countdown "in 25 min" for nextEvent 25 minutes ahead', () => {
     const nextEvent = { title: 'Standup', start: new Date(Date.parse(START) + 25 * 60_000).toISOString() };
-    render(client.Tile, { props: tileProps({ data: { rev: 1, timers: [], nextEvent } }) });
+    render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 1, timers: [], nextEvent } }) });
     expect(screen.getByText('in 25 min')).toBeTruthy();
     expect(screen.getByText('Standup')).toBeTruthy();
   });
@@ -65,12 +67,12 @@ describe('Tile', () => {
   test('countdown wording: 1 min, hours, now, and hidden when showNextEvent is off', () => {
     const at = (min: number) => ({ title: 'E', start: new Date(Date.parse(START) + min * 60_000).toISOString() });
     for (const [min, text] of [[1, 'in 1 min'], [120, 'in 2 h'], [60, 'in 1 h'], [-1, 'now']] as const) {
-      const { unmount } = render(client.Tile, { props: tileProps({ data: { rev: 1, timers: [], nextEvent: at(min) } }) });
+      const { unmount } = render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 1, timers: [], nextEvent: at(min) } }) });
       expect(screen.getByText(text)).toBeTruthy();
       unmount();
     }
     render(client.Tile, {
-      props: tileProps({ data: { rev: 1, timers: [], nextEvent: at(25) }, settings: { ...settings, showNextEvent: false } }),
+      props: tileProps({ data: { epoch: EPOCH, rev: 1, timers: [], nextEvent: at(25) }, settings: { ...settings, showNextEvent: false } }),
     });
     expect(screen.queryByText('in 25 min')).toBeNull();
   });
@@ -89,7 +91,7 @@ describe('Tile', () => {
   test('timer labels, the tile label and the event title are marked as user content', () => {
     const nextEvent = { title: 'Standup', start: new Date(Date.parse(START) + 25 * 60_000).toISOString() };
     const { container } = render(client.Tile, {
-      props: tileProps({ data: { rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent }, settings: { ...settings, label: 'Home' } }),
+      props: tileProps({ data: { epoch: EPOCH, rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent }, settings: { ...settings, label: 'Home' } }),
     });
     const user = [...container.querySelectorAll('[data-user]')].map((e) => e.textContent);
     expect(user.sort()).toEqual(['Home', 'Standup', 'Tea']);
@@ -119,7 +121,7 @@ describe('Tile', () => {
 
   test('the tile has no interactive content: the shell frame opens the detail pane', () => {
     const { container } = render(client.Tile, {
-      props: tileProps({ data: { rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent: fixture.nextEvent } }),
+      props: tileProps({ data: { epoch: EPOCH, rev: 1, timers: [timer('a', 'Tea', 60)], nextEvent: fixture.nextEvent } }),
     });
     expect(container.querySelector('button, a, input, select, textarea, [tabindex], [role=button]')).toBeNull();
   });
@@ -169,17 +171,17 @@ describe('Tile', () => {
   });
 
   test('a snapshot with an older rev than the one shown is ignored by the tile, a newer one applies', async () => {
-    const { rerender } = render(client.Tile, { props: tileProps({ data: { rev: 5, timers: [timer('a', 'Tea', 60)], nextEvent: null } }) });
+    const { rerender } = render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 5, timers: [timer('a', 'Tea', 60)], nextEvent: null } }) });
     expect(screen.getByText('Tea')).toBeTruthy();
-    await rerender(tileProps({ data: { rev: 4, timers: [], nextEvent: null } }));
+    await rerender(tileProps({ data: { epoch: EPOCH, rev: 4, timers: [], nextEvent: null } }));
     expect(screen.getByText('Tea')).toBeTruthy();
-    await rerender(tileProps({ data: { rev: 6, timers: [], nextEvent: null } }));
+    await rerender(tileProps({ data: { epoch: EPOCH, rev: 6, timers: [], nextEvent: null } }));
     expect(screen.queryByText('Tea')).toBeNull();
   });
 
   test('"+1" is shown with three timers and only two are listed', () => {
     const timers = [timer('a', 'Tea', 60), timer('b', 'Eggs', 120), timer('c', 'Bread', 180)];
-    render(client.Tile, { props: tileProps({ data: { rev: 1, timers, nextEvent: null } }) });
+    render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 1, timers, nextEvent: null } }) });
     expect(screen.getByText('+1')).toBeTruthy();
     expect(screen.getByText('Tea')).toBeTruthy();
     expect(screen.getByText('Eggs')).toBeTruthy();
@@ -188,7 +190,7 @@ describe('Tile', () => {
 
   test('at the minimum size (2x1) only the face is shown', () => {
     const timers = [timer('a', 'Tea', 60)];
-    render(client.Tile, { props: tileProps({ size: { w: 2, h: 1 }, data: { rev: 1, timers, nextEvent: fixture.nextEvent } }) });
+    render(client.Tile, { props: tileProps({ size: { w: 2, h: 1 }, data: { epoch: EPOCH, rev: 1, timers, nextEvent: fixture.nextEvent } }) });
     expect(screen.queryByText('Tea')).toBeNull();
     expect(screen.queryByText('Team standup')).toBeNull();
     expect(screen.getByText('12:00')).toBeTruthy();
@@ -196,7 +198,7 @@ describe('Tile', () => {
 
   test('ticks per second while a timer is running even if showSeconds is false', async () => {
     const timers = [timer('a', 'Tea', 90)];
-    render(client.Tile, { props: tileProps({ data: { rev: 1, timers, nextEvent: null } }) });
+    render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 1, timers, nextEvent: null } }) });
     expect(screen.getByText('1:30')).toBeTruthy();
     await vi.advanceTimersByTimeAsync(1000);
     expect(screen.getByText('1:29')).toBeTruthy();
@@ -273,7 +275,7 @@ describe('useNow', () => {
 
 describe('Detail', () => {
   const detailData = loadFixture<Snapshot>(moduleDir, 'detail');
-  const detailList = { rev: detailData.rev, timers: detailData.timers };
+  const detailList = { epoch: EPOCH, rev: detailData.rev, timers: detailData.timers };
   const ZONES = ['Europe/Berlin', 'America/New_York', 'Asia/Tokyo']; // GET /zones, not part of a snapshot
   const emptyApi = (over: Partial<ModuleApi> = {}): ModuleApi =>
     ({
@@ -282,7 +284,7 @@ describe('Detail', () => {
       put: vi.fn(),
       patch: vi.fn(),
       delete: vi.fn((path: string) =>
-        Promise.resolve({ rev: detailData.rev + 1, timers: detailData.timers.filter((x) => path !== `/timers/${x.id}`) }),
+        Promise.resolve({ epoch: EPOCH, rev: detailData.rev + 1, timers: detailData.timers.filter((x) => path !== `/timers/${x.id}`) }),
       ),
       ...over,
     }) as unknown as ModuleApi;
@@ -297,6 +299,7 @@ describe('Detail', () => {
     t: identityT,
     locale: 'en',
     timeZone: 'UTC',
+    isOwner: true,
     params: {},
     close: () => undefined,
     ...over,
@@ -320,8 +323,8 @@ describe('Detail', () => {
 
   test('creating a timer posts label and duration, cancelling deletes', async () => {
     const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
-    const post = vi.fn(() => Promise.resolve({ rev: 6, timers: [...detailData.timers, created] }));
-    const del = vi.fn(() => Promise.resolve({ rev: 7, timers: detailData.timers }));
+    const post = vi.fn(() => Promise.resolve({ epoch: EPOCH, rev: 6, timers: [...detailData.timers, created] }));
+    const del = vi.fn(() => Promise.resolve({ epoch: EPOCH, rev: 7, timers: detailData.timers }));
     const api = emptyApi({ post: post as ModuleApi['post'], delete: del as ModuleApi['delete'] });
     const { container } = render(client.Detail, { props: props({ api }) });
     await vi.advanceTimersByTimeAsync(0);
@@ -371,7 +374,7 @@ describe('Detail', () => {
   test('a double click on Cancel sends one request and the button is busy meanwhile', async () => {
     let finish: () => void = () => undefined;
     const del = vi.fn(
-      () => new Promise<TimerList>((resolve) => (finish = () => resolve({ rev: 6, timers: detailData.timers.slice(1) }))),
+      () => new Promise<TimerList>((resolve) => (finish = () => resolve({ epoch: EPOCH, rev: 6, timers: detailData.timers.slice(1) }))),
     );
     render(client.Detail, { props: props({ api: emptyApi({ delete: del as ModuleApi['delete'] }) }) });
     await vi.advanceTimersByTimeAsync(0);
@@ -394,7 +397,7 @@ describe('Detail', () => {
     await fireEvent.submit(form);
     await fireEvent.submit(form);
     expect(post).toHaveBeenCalledTimes(1);
-    finish({ rev: 6, timers: [] });
+    finish({ epoch: EPOCH, rev: 6, timers: [] });
     await vi.advanceTimersByTimeAsync(0);
   });
 
@@ -462,7 +465,7 @@ describe('Detail', () => {
 
   describe('ordering by rev', () => {
     const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
-    const withTea = (rev: number) => ({ rev, timers: [...detailData.timers, created] });
+    const withTea = (rev: number) => ({ epoch: EPOCH, rev, timers: [...detailData.timers, created] });
     const defer = <T,>() => {
       let resolve: (v: T) => void = () => undefined;
       const promise = new Promise<T>((r) => (resolve = r));
@@ -483,7 +486,7 @@ describe('Detail', () => {
       await vi.advanceTimersByTimeAsync(0);
       await submit(container);
       expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
-      lateGet.resolve({ rev: detailData.rev, timers: detailData.timers }); // issued before the POST, answered after it
+      lateGet.resolve({ epoch: EPOCH, rev: detailData.rev, timers: detailData.timers }); // issued before the POST, answered after it
       await vi.advanceTimersByTimeAsync(0);
       expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
     });
@@ -516,7 +519,7 @@ describe('Detail', () => {
       expect(timersGets).toBe(2);
       second.resolve(withTea(9));
       await vi.advanceTimersByTimeAsync(0);
-      first.resolve({ rev: 8, timers: detailData.timers });
+      first.resolve({ epoch: EPOCH, rev: 8, timers: detailData.timers });
       await vi.advanceTimersByTimeAsync(0);
       expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
     });
@@ -539,6 +542,73 @@ describe('Detail', () => {
       render(client.Detail, { props: props({ api: emptyApi({ get: get as ModuleApi['get'] }) }) });
       await vi.advanceTimersByTimeAsync(0);
       expect(screen.getByRole('alert').textContent).toContain('Could not load');
+    });
+  });
+
+
+  describe('epoch (server restart)', () => {
+    const NEW = 'boot-2';
+    test('a lower rev with a new epoch replaces the list; the same epoch with a lower rev is ignored', async () => {
+      const { rerender } = render(client.Detail, { props: props({ data: { ...detailData, rev: 9 } }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('button', { name: 'Cancel Laundry' })).toBeTruthy();
+      await rerender(props({ data: { ...detailData, rev: 3, timers: detailData.timers.slice(0, 1) } })); // same epoch, older
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole('button', { name: 'Cancel Laundry' })).toBeTruthy();
+      await rerender(props({ data: { ...detailData, epoch: NEW, rev: 1, timers: detailData.timers.slice(0, 1) } })); // restart
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByRole('button', { name: 'Cancel Laundry' })).toBeNull();
+    });
+
+    test('a list answer from a new epoch with a lower rev is applied', async () => {
+      const get = vi.fn((path: string) =>
+        Promise.resolve(path === '/zones' ? ZONES : { epoch: NEW, rev: 0, timers: detailData.timers.slice(0, 1) }),
+      );
+      render(client.Detail, { props: props({ api: emptyApi({ get: get as ModuleApi['get'] }) }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByRole('button', { name: 'Cancel Laundry' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Cancel Pasta' })).toBeTruthy();
+    });
+
+    test('the tile takes a snapshot of a new epoch with a lower rev, and ignores an older rev of the same epoch', async () => {
+      const { rerender } = render(client.Tile, { props: tileProps({ data: { epoch: EPOCH, rev: 5, timers: [timer('a', 'Tea', 60)], nextEvent: null } }) });
+      await rerender(tileProps({ data: { epoch: EPOCH, rev: 4, timers: [], nextEvent: null } }));
+      expect(screen.getByText('Tea')).toBeTruthy();
+      await rerender(tileProps({ data: { epoch: NEW, rev: 1, timers: [], nextEvent: null } }));
+      expect(screen.queryByText('Tea')).toBeNull();
+    });
+  });
+
+  describe('shared page (not the owner)', () => {
+    test('shows the owner\'s snapshot read-only and calls no route', async () => {
+      const get = vi.fn();
+      const post = vi.fn();
+      const put = vi.fn();
+      const api = emptyApi({ get, post, put });
+      const { container } = render(client.Detail, { props: props({ isOwner: false, api }) });
+      await vi.advanceTimersByTimeAsync(0);
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get).not.toHaveBeenCalled();
+      expect(post).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-edit]')).toBeNull();
+      expect(screen.queryByRole('button', { name: /Remove|Cancel|Start timer|Add/ })).toBeNull();
+      expect(screen.getByText('Pasta')).toBeTruthy(); // the owner's timers
+      expect(screen.getByText('World clocks are personal to each user.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Start' })).toBeTruthy(); // stopwatch is local
+    });
+
+    test('a pushed snapshot still updates the list', async () => {
+      const get = vi.fn();
+      const api = emptyApi({ get });
+      const { rerender } = render(client.Detail, { props: props({ isOwner: false, api }) });
+      await vi.advanceTimersByTimeAsync(0);
+      await rerender(props({ isOwner: false, api, data: { ...detailData, rev: detailData.rev + 1, timers: detailData.timers.slice(0, 1) } }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.queryByText('Laundry')).toBeNull();
+      expect(get).not.toHaveBeenCalled();
     });
   });
 
@@ -566,8 +636,8 @@ describe('Detail', () => {
 
   test('a saved zone the runtime does not know renders in UTC instead of crashing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const api = emptyApi({ get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Mars/Base'] : [])) as ModuleApi['get'] });
-    render(client.Detail, { props: props({ api, data: { rev: 1, timers: [], nextEvent: null } }) });
+    const api = emptyApi({ get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Mars/Base'] : detailList)) as ModuleApi['get'] });
+    render(client.Detail, { props: props({ api, data: { epoch: EPOCH, rev: 1, timers: [], nextEvent: null } }) });
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.getByText('Mars/Base')).toBeTruthy();
     expect(screen.getByText('12:00')).toBeTruthy();

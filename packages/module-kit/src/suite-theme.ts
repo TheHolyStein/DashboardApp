@@ -602,6 +602,7 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
               api: stubApi,
               locale: 'de-DE',
               timeZone: 'Asia/Kolkata',
+              isOwner: true,
               t: identityT,
               openDetail: () => undefined,
             };

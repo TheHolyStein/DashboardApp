@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { DetailProps } from '@dash/contract';
 
-  let { data, level, t, close }: DetailProps<{ value: number; label: string; history?: number[] }> = $props();
+  let { data, level, isOwner, t, close }: DetailProps<{ value: number; label: string; history?: number[] }> = $props();
 </script>
 
 <section>
@@ -15,7 +15,7 @@
     </ul>
   {/if}
   <button type="button" onclick={() => close()}>{t('module.sample.close', 'Close')}</button>
-  {#if level === 'edit'}
+  {#if level === 'edit' && isOwner}
     <button type="button" data-edit>{t('module.sample.reset', 'Reset')}</button>
   {/if}
 </section>

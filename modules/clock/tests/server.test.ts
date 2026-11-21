@@ -420,7 +420,7 @@ describe('routes', () => {
     const t = createTimer(db, 'u1', { label: 'mine', durationSec: 60 }, START);
     const res = await router.call('DELETE', `/timers/${t.id}`, { level: 'edit' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ rev: 1, timers: [] }); // the caller's full current list, not 204
+    expect(res.body).toMatchObject({ rev: 1, timers: [] }); // the caller's full current list, not 204
     expect(listTimers(db, 'u1', START)).toEqual([]);
     expect(host.pushed.map((p) => p.instanceId).sort()).toEqual(['i1', 'i3']);
   });
@@ -494,7 +494,7 @@ describe('revision ordering', () => {
     host.advance(5_000);
     await tick(); // b fires
     const after = await body(router, 'GET', '/timers', { level: 'view' });
-    expect(after).toEqual({ rev: 4, timers: [] });
+    expect(after).toMatchObject({ rev: 4, timers: [] });
     expect((await body(router, 'GET', '/timers', { level: 'view', user: { id: 'u2' } })).rev).toBe(0);
   });
 
@@ -522,5 +522,60 @@ describe('revision ordering', () => {
     const next = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'c', durationSec: 60 } });
     expect(next.rev).toBe(3);
     expect(await host.store.get('rev:u1')).toBe(3);
+  });
+
+  test('every snapshot and list carries the boot epoch; a restart gets a new one', async () => {
+    const { host, router, pushedTo } = await setup();
+    const first = await body(router, 'POST', '/timers', { level: 'edit', body: { label: 'a', durationSec: 60 } });
+    expect(first.epoch).toBeTruthy();
+    expect((pushedTo('i1').at(-1)!.data as Snapshot).epoch).toBe(first.epoch);
+    host.advance(1_000);
+    await server.setup!(host); // restart
+    const second = await body(router, 'GET', '/timers', { level: 'view' });
+    expect(second.epoch).not.toBe(first.epoch);
+  });
+
+  test('old next event is never stamped with the new rev (snapshot racing the calendar handler)', async () => {
+    const { host, tick, pushedTo } = await setup();
+    await tick(); // startup push
+    const ev = (title: string, start: string) => ({ uid: title, title, start, minutesUntil: 30, userIds: ['u1'] });
+    await server.on!['calendar.event.upcoming']!(ev('Old', '2026-01-01T12:40:00.000Z'), host);
+    const firstRev = (pushedTo('i1').at(-1)!.data as Snapshot).rev;
+
+    // Hold the store write of the new next event open, as a slow disk would.
+    const realSet = host.store.set.bind(host.store);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    host.store.set = async (key: string, value: unknown) => {
+      if (key === 'next:u1') await gate;
+      return realSet(key, value);
+    };
+    // Hold the snapshot's read of the next event until the write has finished and bumped.
+    const realGet = host.store.get.bind(host.store);
+    let releaseGet!: () => void;
+    const getGate = new Promise<void>((r) => (releaseGet = r));
+    let held = false;
+    host.store.get = (async (key: string) => {
+      if (key === 'next:u1' && !held) {
+        held = true;
+        const stale = await realGet(key); // reads the OLD event now ...
+        await getGate; // ... and delivers it only later
+        return stale;
+      }
+      return realGet(key);
+    }) as typeof host.store.get;
+
+    const before = pushedTo('i1').length;
+    const snapshotRun = server.onInstanceChange!('added', inst('i1', 'u1'), host); // builds a snapshot, stuck in get
+    await Promise.resolve();
+    release();
+    host.store.get = realGet;
+    await server.on!['calendar.event.upcoming']!(ev('New', '2026-01-01T12:20:00.000Z'), host);
+    releaseGet();
+    await snapshotRun;
+    for (const p of pushedTo('i1').slice(before)) {
+      const snap = p.data as Snapshot;
+      if (snap.nextEvent?.title === 'Old') expect(snap.rev).toBeLessThanOrEqual(firstRev);
+    }
   });
 });

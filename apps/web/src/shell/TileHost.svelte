@@ -83,7 +83,9 @@
     );
   });
 
-  const base: ReturnType<typeof baseProps> = $derived(baseProps(instance, mode));
+  // The owner of the page owns its instances; on a shared page the viewer sees the owner's data read-only.
+  const isOwner = $derived(page.ownerId === session.me?.id);
+  const base: ReturnType<typeof baseProps> = $derived(baseProps(instance, mode, isOwner));
   const tileProps: TileProps = $derived({
     ...base,
     size: { w: instance.layout.w, h: instance.layout.h },
@@ -91,7 +93,7 @@
   });
 
   // Settings are for the page owner with edit level on the module (the server enforces both).
-  const canConfigure = $derived(page.ownerId === session.me?.id && grantLevel(session.me?.grants, instance.moduleId) === 'edit');
+  const canConfigure = $derived(isOwner && grantLevel(session.me?.grants, instance.moduleId) === 'edit');
 
   const INTERACTIVE =
     'a, button, input, select, textarea, label, summary, [contenteditable], [contenteditable=""], [role=button], [role=link], [role=switch], [role=checkbox], [role=tab], [role=menuitem], [data-no-open]';

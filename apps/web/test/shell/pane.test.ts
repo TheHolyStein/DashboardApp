@@ -162,6 +162,17 @@ describe('detail pane', () => {
     await waitFor(() => expect(dialog()).toBeNull());
   });
 
+  it('the Detail gets isOwner true on an own page and false on someone else\'s shared page', async () => {
+    await setup('/p/p1?d=i1');
+    const owners = () => within(screen.getByRole('dialog')).getAllByTestId('owner').map((e) => e.textContent);
+    await screen.findByTestId('detail');
+    expect(owners()).toEqual(['true']);
+    pages.clear();
+    server.use(http.get('/api/pages', () => HttpResponse.json([{ ...pg, ownerId: 'u2', shared: true }])));
+    await pages.load();
+    await waitFor(() => expect(owners()).toEqual(['false']));
+  });
+
   it('direct load with ?d=<id> opens the pane once pages are ready, with params from dp.*', async () => {
     await setup('/p/p1?d=i1&dp.tab=month');
     expect((await screen.findByTestId('tab')).textContent).toBe('month');

@@ -10,12 +10,12 @@
 
   let { data: pushed, settings, size, mode, t, locale, timeZone: userTimeZone }: TileProps<Snapshot, Settings> = $props();
 
-  // A snapshot older than the one on screen (a late or reordered push) is ignored.
+  // A snapshot older than the one on screen (a late or reordered push) is ignored; a new server epoch always wins.
   let data = $state.raw<Snapshot | undefined>(untrack(() => pushed));
   $effect.pre(() => {
     const next = pushed;
     untrack(() => {
-      if (next && (!data || next.rev >= data.rev)) data = next;
+      if (next && (!data || next.epoch !== data.epoch || next.rev >= data.rev)) data = next;
     });
   });
 

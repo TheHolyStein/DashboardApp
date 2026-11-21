@@ -28,6 +28,11 @@ export interface TileProps<D = unknown, S = unknown> {
   locale: string;
   /** The signed-in user's saved IANA time zone (e.g. `Asia/Kolkata`). Pass it as `timeZone` when formatting times and dates. */
   timeZone: string;
+  /**
+   * True when the signed-in user owns the instance. On a shared page it is false: show the owner's data
+   * read-only from the snapshot; do not call caller-scoped routes or render mutation controls.
+   */
+  isOwner: boolean;
   openDetail: (params?: Record<string, string>) => void;
 }
 
@@ -43,6 +48,8 @@ export interface SettingsProps<S = unknown> {
   t: Translate;
   locale: string;
   timeZone: string;
+  /** True when the signed-in user owns the instance (always true for the settings dialog today). */
+  isOwner: boolean;
 }
 
 export interface ModuleClient {

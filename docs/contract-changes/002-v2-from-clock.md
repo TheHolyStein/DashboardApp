@@ -126,6 +126,15 @@ Three additive completions made before any module beyond Clock exists. `CONTRACT
 - Affected: tiles showing user content.
 - Migration: wrap such text in `<span data-user>`.
 
+## v2 completion (shared pages)
+
+`CONTRACT_VERSION` stays 2. Additive; recorded here because it completes the Clock work.
+
+### B1. `isOwner` on `TileProps`, `DetailProps`, `SettingsProps`
+- Problem: on a shared page the viewer receives the owner's snapshot, but caller-scoped routes (`req.user.id`) answer for the viewer. A module could not tell the two cases apart, so Clock's pane mixed the owner's `rev` with the viewer's and could show the wrong list.
+- Change: `isOwner: boolean`, true when the signed-in user owns the instance. The shell derives it from the page's `ownerId` against `session.me.id` (`InstanceDto` has no owner field), as it already does for edit rights. `TileHost`, `DetailHost` and `SettingsDialog` pass it. The client contract suite renders tile and detail with both values and fails on `[data-edit]` controls when `isOwner` is false.
+- Affected: every client module and test that builds these props by hand.
+- Migration: add `isOwner: true` to hand-built props. On a shared page (`isOwner` false) show the owner's data read-only from the snapshot; do not call caller-scoped routes or render mutation controls. The module template now gates its edit controls on `level === 'edit' && isOwner`.
 
 ## Open, not changed (found while finishing Clock and writing the end-to-end test)
 

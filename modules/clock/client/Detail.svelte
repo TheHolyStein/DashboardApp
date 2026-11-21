@@ -14,7 +14,7 @@
     clock?: () => number;
   };
 
-  let { data, settings, level, api, t, clock, locale }: Props = $props();
+  let { data, settings, level, isOwner, api, t, clock, locale }: Props = $props();
 
   const MAX_ZONES = 12;
   const MAX_TIMER_SEC = 86_400;
@@ -24,7 +24,9 @@
   let zonesLoaded = $state(false);
   // The one source of truth for the timer list. Every list that arrives (snapshot push, GET, POST or DELETE
   // response) goes through `applyList`, which keeps only data at least as new as what is held.
-  let list = $state.raw<TimerList>(untrack(() => ({ rev: data?.rev ?? -1, timers: data?.timers ?? [] })));
+  // On a shared page (`isOwner` false) the snapshot is the owner's data and the only source: the routes answer for
+  // the caller, whose counter is a different one, so they are never called and their answers never mixed in.
+  let list = $state.raw<TimerList>(untrack(() => ({ epoch: data?.epoch ?? '', rev: data?.rev ?? -1, timers: data?.timers ?? [] })));
   const timers = $derived(list.timers);
   let error = $state('');
   let zonesHeading = $state<HTMLElement>();
@@ -42,8 +44,11 @@
     heading?.focus();
   }
 
+  /** A new server epoch (a restart) always wins, even with a lower rev; within one epoch only `rev >=` is applied. */
   function applyList(incoming: TimerList): void {
-    if (incoming.rev >= list.rev) list = { rev: incoming.rev, timers: incoming.timers };
+    if (incoming.epoch !== list.epoch || incoming.rev >= list.rev) {
+      list = { epoch: incoming.epoch, rev: incoming.rev, timers: incoming.timers };
+    }
   }
 
   $effect(() => {
@@ -56,6 +61,7 @@
   }
 
   onMount(() => {
+    if (!isOwner) return; // the owner's snapshot is all there is to show
     api.get<string[]>('/zones').then(
       (saved) => {
         zones = saved;
@@ -178,7 +184,9 @@
 
   <section aria-labelledby="clock-zones">
     <h3 id="clock-zones" tabindex="-1" bind:this={zonesHeading}>{t('m.clock.worldClocks', 'World clocks')}</h3>
-    {#if !zonesLoaded}
+    {#if !isOwner}
+      <p class="loading">{t('m.clock.zonesPersonal', 'World clocks are personal to each user.')}</p>
+    {:else if !zonesLoaded}
       <p class="loading" aria-busy="true">{t('m.clock.loading', 'Loading…')}</p>
     {:else if zones.length === 0}
       <Empty text={t('m.clock.noZones', 'No world clocks yet.')} />
@@ -188,7 +196,7 @@
           <li>
             <span class="name" data-value>{zone}</span>
             <time class="value" data-value>{formatTime(now, { locale, timeZone: zone, hour12: settings.hour12, seconds: false })}</time>
-            {#if level === 'edit'}
+            {#if isOwner && level === 'edit'}
               <Button
                 data-edit
                 variant="danger"
@@ -201,7 +209,7 @@
         {/each}
       </ul>
     {/if}
-    {#if level === 'edit'}
+    {#if isOwner && level === 'edit'}
       <div class="add" data-edit>
         <Field label={t('m.clock.addZone', 'Add a time zone')}>
           {#snippet children({ describedBy })}
@@ -229,7 +237,7 @@
           <li>
             <span class="name">{#if timer.label}<span data-user>{timer.label}</span>{:else}{t('m.clock.timer', 'Timer')}{/if}</span>
             <span class="value" data-value>{formatRemaining(Date.parse(timer.endsAt) - now.getTime())}</span>
-            {#if level === 'edit'}
+            {#if isOwner && level === 'edit'}
               <Button
                 data-edit
                 variant="danger"
@@ -242,7 +250,7 @@
         {/each}
       </ul>
     {/if}
-    {#if level === 'edit'}
+    {#if isOwner && level === 'edit'}
       <form class="new-timer" data-edit onsubmit={createTimer}>
         <Field label={t('m.clock.timerLabel', 'Label')}>
           {#snippet children({ describedBy })}

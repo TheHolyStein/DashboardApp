@@ -45,6 +45,15 @@ afterEach(() => {
 });
 
 describe('TileHost', () => {
+  it('passes isOwner true on the viewer\'s own page and false on a shared page of someone else', async () => {
+    const { modules } = fakeRegistry();
+    const own = renderHost(good, modules);
+    expect((await screen.findByTestId('owner')).textContent).toBe('true');
+    own.unmount();
+    render(TileHost, { props: { instance: good, page: page('p1', [good], { ownerId: 'u2', shared: true }), modules } });
+    expect((await screen.findByTestId('owner')).textContent).toBe('false');
+  });
+
   it('tile that throws shows failure placeholder and others still render', async () => {
     const { modules } = fakeRegistry();
     control.throwTile = true;

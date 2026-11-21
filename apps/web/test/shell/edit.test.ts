@@ -137,6 +137,7 @@ describe('settings dialog', () => {
     await userEvent.click(await tileSettings('x1'));
     const input = await screen.findByTestId<HTMLInputElement>('custom-settings');
     expect(input.value).toBe('abc');
+    expect(screen.getByTestId('settings-owner').textContent).toBe('true');
     await userEvent.type(input, 'd');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(calls).toHaveLength(1));

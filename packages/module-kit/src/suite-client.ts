@@ -84,6 +84,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     t: identityT,
     locale: SUITE_LOCALE,
     timeZone: SUITE_TIME_ZONE,
+    isOwner: true,
     openDetail: () => undefined,
     ...over,
   });
@@ -98,6 +99,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     t: identityT,
     locale: SUITE_LOCALE,
     timeZone: SUITE_TIME_ZONE,
+    isOwner: true,
     params: {},
     close: () => undefined,
     ...over,
@@ -147,7 +149,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     if (offenders.length > 0) fail(`text not passed through t(): ${offenders.join('; ')}`);
   };
   const checkNoEdit = (what: string, container: HTMLElement): void => {
-    if (container.querySelector('[data-edit]')) fail(`${what} shows [data-edit] controls at level view`);
+    if (container.querySelector('[data-edit]')) fail(`${what} shows [data-edit] controls at level view or when the user is not the owner`);
   };
 
   return [
@@ -155,6 +157,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
       name: 'tile renders with fixture data',
       run: () => {
         for (const mode of ['day', 'night'] as Mode[]) renderTile(tileProps({ mode }), nonEmpty(`tile (${mode})`));
+        renderTile(tileProps({ isOwner: false }), nonEmpty('tile (not owner)'));
         return Promise.resolve();
       },
     },
@@ -185,6 +188,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
       name: 'detail renders with fixture data',
       run: () => {
         renderDetail(detailProps(), nonEmpty('detail'));
+        renderDetail(detailProps({ isOwner: false }), nonEmpty('detail (not owner)'));
         return Promise.resolve();
       },
     },
@@ -202,6 +206,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
           checkTexts('detail (data undefined)', c),
         );
         renderDetail(detailProps({ t: markedT, stale: true }), (c) => checkTexts('detail (stale)', c));
+        renderDetail(detailProps({ t: markedT, isOwner: false }), (c) => checkTexts('detail (not owner)', c));
         return Promise.resolve();
       },
     },
@@ -210,6 +215,9 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
       run: () => {
         renderTile(tileProps({ level: 'view' }), (c) => checkNoEdit('tile', c));
         renderDetail(detailProps({ level: 'view' }), (c) => checkNoEdit('detail', c));
+        // A viewer on a shared page may hold the edit grant; the instance still is not theirs.
+        renderTile(tileProps({ isOwner: false }), (c) => checkNoEdit('tile (not owner)', c));
+        renderDetail(detailProps({ isOwner: false }), (c) => checkNoEdit('detail (not owner)', c));
         return Promise.resolve();
       },
     },

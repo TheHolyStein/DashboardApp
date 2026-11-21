@@ -16,18 +16,20 @@ export type Settings = z.infer<typeof settings>;
 type WireTimer = { id: string; label: string; endsAt: string; durationSec: number };
 
 /**
- * What the server pushes to each placed instance (per owner, not module-wide). `rev` is the owner's revision:
- * it rises with every change to their timers or next event, so a client applies only data at least as new as
- * the newest it has seen.
+ * What the server pushes to each placed instance (per owner, not module-wide). `rev` is the data owner's
+ * revision: it rises with every change to their timers or next event. `epoch` names the server boot: a client
+ * applies data from a new epoch always (a restart wins even if `rev` is lower) and, within one epoch, only
+ * data at least as new as the newest it has seen.
  */
 export type Snapshot = {
+  epoch: string;
   rev: number;
   timers: WireTimer[];
   nextEvent: { title: string; start: string } | null;
 };
 
-/** The body of `GET /timers`, `POST /timers` and `DELETE /timers/:id`: the caller's full list at revision `rev`. */
-export type TimerList = { rev: number; timers: WireTimer[] };
+/** The body of `GET /timers`, `POST /timers` and `DELETE /timers/:id`: the caller's full list at `{ epoch, rev }`. */
+export type TimerList = { epoch: string; rev: number; timers: WireTimer[] };
 
 export default defineManifest({
   id: 'clock',

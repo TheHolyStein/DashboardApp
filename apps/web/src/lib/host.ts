@@ -50,7 +50,7 @@ export function userFormat(): { locale: string; timeZone: string } {
 }
 
 /** The part of Tile/Detail props that is the same for both. */
-export function baseProps(instance: Instance, mode: Mode) {
+export function baseProps(instance: Instance, mode: Mode, isOwner: boolean) {
   const snap = stream.snapshots[instance.id];
   return {
     data: snap?.data,
@@ -59,6 +59,7 @@ export function baseProps(instance: Instance, mode: Mode) {
     settings: instance.settings,
     level: grantLevel(session.me?.grants, instance.moduleId) === 'edit' ? ('edit' as const) : ('view' as const),
     mode,
+    isOwner,
     api: moduleApi(instance.moduleId),
     t,
     ...userFormat(),

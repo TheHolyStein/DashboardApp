@@ -1,7 +1,7 @@
 import { DashError, type HostServices, type UserId } from '@dash/contract';
-import { abortable, createSnapshotPusher, defineServer, type SnapshotPusher } from '@dash/module-kit';
+import { abortable, createSnapshotPusher, defineServer, newId, type SnapshotPusher } from '@dash/module-kit';
 import manifest, { type TimerList } from '../manifest.js';
-import { nextKey, pushSnapshots, type NextEvent } from './snapshot.js';
+import { nextKey, pushSnapshots, type NextEvent, type Stamp } from './snapshot.js';
 import { normaliseZones, zonesInput, zonesKey } from './zones.js';
 import { createTimer, deleteTimer, dueTimers, listTimers, markFired, purgeFired, timerInput, toWire } from './timers.js';
 
@@ -19,11 +19,15 @@ interface State {
   nextSeq: number;
   lastPurge: number;
   /**
-   * Per-owner revision: raised in the same synchronous step as every change to that owner's timers or next
-   * event, and carried by every snapshot and list response so clients can drop anything older than what they hold.
-   * Persisted as `rev:<userId>` so it never goes backwards across a restart.
+   * Per-owner revision, carried (with `epoch`) by every snapshot and list response so clients can drop anything
+   * older than what they hold. THE RULE: a writer raises the rev in the same synchronous step in which its change
+   * becomes visible to readers (right after a SQLite write, or right after the awaited store write/delete
+   * resolves), never before it. `buildSnapshot` reads the rev before its await, so it may pair new content with
+   * an old rev (harmless) but never old content with a new rev. Persisted as `rev:<userId>` so it never goes backwards across a restart.
    */
   revs: Map<UserId, number>;
+  /** Names this boot. A client applies data from a new epoch even if its rev is lower, so a lost `rev:` write cannot strand it. */
+  epoch: string;
 }
 
 function createClockServer() {
@@ -35,7 +39,7 @@ function createClockServer() {
   };
 
   const revOf = (owner: UserId): number => need().revs.get(owner) ?? 0;
-  /** Synchronous: call it in the same step as the change it stands for, then `persistRev` before any await. */
+  /** Synchronous: call it right after the change it stands for is visible (see THE RULE on `revs`), then `persistRev`. */
   const bump = (owner: UserId): number => {
     const rev = revOf(owner) + 1;
     need().revs.set(owner, rev);
@@ -49,9 +53,10 @@ function createClockServer() {
       host.log.error('clock: saving the revision failed', { user: owner, err: String(err) });
     }
   };
-  /** The caller's full current list with the revision it belongs to, read in one synchronous step. */
+  const stamp: Stamp = (owner) => ({ epoch: need().epoch, rev: revOf(owner) });
+  /** The caller's full current list with the stamp it belongs to, read in one synchronous step. */
   const listOf = (host: HostServices, owner: UserId): TimerList => ({
-    rev: revOf(owner),
+    ...stamp(owner),
     timers: listTimers(host.store.db, owner, host.now()).map(toWire),
   });
 
@@ -81,7 +86,15 @@ function createClockServer() {
         const rev = await host.store.get<number>(key);
         if (typeof rev === 'number') revs.set(key.slice(REV_PREFIX.length), rev);
       }
-      state = { pusher: createSnapshotPusher(host), started: false, hasNext: null, nextSeq: 0, lastPurge: 0, revs };
+      state = {
+        pusher: createSnapshotPusher(host),
+        started: false,
+        hasNext: null,
+        nextSeq: 0,
+        lastPurge: 0,
+        revs,
+        epoch: newId(host.now()),
+      };
     },
 
     jobs: {
@@ -143,6 +156,7 @@ function createClockServer() {
             if (event && Date.parse(event.start) <= now.getTime()) {
               await abortable(signal, host.store.delete(key));
               const owner = key.slice('next:'.length);
+              // Straight after the awaited delete resolved (THE RULE): bump, then persist.
               await abortable(signal, persistRev(host, owner, bump(owner)));
               remaining--;
               dirty = true;
@@ -153,7 +167,7 @@ function createClockServer() {
         }
 
         if (!dirty) return;
-        await pushSnapshots(host, s.pusher, await abortable(signal, host.instances()), revOf, signal);
+        await pushSnapshots(host, s.pusher, await abortable(signal, host.instances()), stamp, signal);
         s.started = true; // only after the push succeeded, so a failed startup push is retried
       },
     },
@@ -176,23 +190,24 @@ function createClockServer() {
           s.hasNext = true;
           await host.store.set(nextKey(userId), { title: event.title, start: event.start });
           s.nextSeq++;
+          // Straight after the awaited write resolved: the new event is visible, so the bump may follow (THE RULE).
           await persistRev(host, userId, bump(userId));
           changed.add(userId);
         }
         if (changed.size === 0) return;
-        await pushSnapshots(host, s.pusher, (await host.instances()).filter((i) => changed.has(i.ownerId)), revOf);
+        await pushSnapshots(host, s.pusher, (await host.instances()).filter((i) => changed.has(i.ownerId)), stamp);
       },
     },
 
     onInstanceChange: async (kind, instance, host) => {
       const s = need();
       if (kind === 'removed') s.pusher.forget(instance.id);
-      else if (kind === 'added') await pushSnapshots(host, s.pusher, [instance], revOf);
+      else if (kind === 'added') await pushSnapshots(host, s.pusher, [instance], stamp);
     },
 
     routes(r, host) {
       const pushFor = async (userId: string): Promise<void> => {
-        await pushSnapshots(host, need().pusher, (await host.instances()).filter((i) => i.ownerId === userId), revOf);
+        await pushSnapshots(host, need().pusher, (await host.instances()).filter((i) => i.ownerId === userId), stamp);
       };
 
       r.get('/timers', { level: 'view' }, (req) => listOf(host, req.user.id));

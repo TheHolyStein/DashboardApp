@@ -2,7 +2,7 @@
   import type { DetailProps } from '@dash/contract';
   import { Button, serial } from '@dash/ui';
 
-  let { data, level, t, api, close }: DetailProps<{ value: number; label: string }> = $props();
+  let { data, level, isOwner, t, api, close }: DetailProps<{ value: number; label: string }> = $props();
 
   let text = $state('');
   let busy = $state(false);
@@ -29,7 +29,7 @@
     <p>{data.label}</p>
     <p><span data-value>{data.value}</span></p>
   {/if}
-  {#if level === 'edit'}
+  {#if level === 'edit' && isOwner}
     <form
       onsubmit={(e) => {
         e.preventDefault();

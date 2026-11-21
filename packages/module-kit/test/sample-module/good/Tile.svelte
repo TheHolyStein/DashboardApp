@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { TileProps } from '@dash/contract';
 
-  let { data, stale, level, t, openDetail }: TileProps<{ value: number; label: string }> = $props();
+  let { data, stale, level, isOwner, t, openDetail }: TileProps<{ value: number; label: string }> = $props();
 </script>
 
 <section class:stale>
@@ -16,7 +16,7 @@
     <p>{t('module.sample.stale', 'Out of date')}</p>
   {/if}
   <button type="button" onclick={() => openDetail()}>{t('module.sample.open', 'Open')}</button>
-  {#if level === 'edit'}
+  {#if level === 'edit' && isOwner}
     <button type="button" data-edit>{t('module.sample.add', 'Add')}</button>
   {/if}
 </section>

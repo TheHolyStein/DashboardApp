@@ -7,10 +7,19 @@ export interface NextEvent { title: string; start: string }
 
 export const nextKey = (userId: UserId): string => `next:${userId}`;
 
-/** `rev` and the timer list are read together after the last await, so they always describe the same moment. */
-export async function buildSnapshot(host: HostServices, ownerId: UserId, revOf: (owner: UserId) => number): Promise<Snapshot> {
+/** The boot epoch and an owner's current revision, as one stamp. */
+export type Stamp = (owner: UserId) => { epoch: string; rev: number };
+
+/**
+ * The stamp is read BEFORE the only await, then the timers (synchronous SQLite) right after it. Writers follow
+ * the matching rule (see `server/index.ts`): they bump the rev in the same synchronous step in which their
+ * change becomes visible, never before. So whatever this reads, the content is at least as new as the stamp
+ * says; it may be newer than its rev (harmless, the next push repeats it), never older.
+ */
+export async function buildSnapshot(host: HostServices, ownerId: UserId, stamp: Stamp): Promise<Snapshot> {
+  const { epoch, rev } = stamp(ownerId);
   const nextEvent = (await host.store.get<NextEvent>(nextKey(ownerId))) ?? null;
-  return { rev: revOf(ownerId), timers: listTimers(host.store.db, ownerId, host.now()).map(toWire), nextEvent };
+  return { epoch, rev, timers: listTimers(host.store.db, ownerId, host.now()).map(toWire), nextEvent };
 }
 
 /**
@@ -22,13 +31,13 @@ export async function pushSnapshots(
   host: HostServices,
   pusher: SnapshotPusher,
   instances: ModuleInstance[],
-  revOf: (owner: UserId) => number,
+  stamp: Stamp,
   signal?: AbortSignal,
 ): Promise<void> {
   if (instances.length === 0) return;
   const wait = <T>(p: Promise<T>): Promise<T> => (signal ? abortable(signal, p) : p);
   const built: Array<[ModuleInstance, Snapshot]> = [];
-  for (const instance of instances) built.push([instance, await wait(buildSnapshot(host, instance.ownerId, revOf))]);
+  for (const instance of instances) built.push([instance, await wait(buildSnapshot(host, instance.ownerId, stamp))]);
   const live = new Set((await wait(host.instances())).map((i) => i.id));
   for (const [instance, snapshot] of built) if (live.has(instance.id)) pusher.push(instance.id, snapshot);
 }

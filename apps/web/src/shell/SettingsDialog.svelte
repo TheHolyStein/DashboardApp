@@ -8,6 +8,7 @@
   import { t } from '../lib/i18n.js';
   import { settingsUi } from '../lib/ui-state.svelte.js';
   import { pages } from '../lib/pages.svelte.js';
+  import { session } from '../lib/session.svelte.js';
   import { coerce, describeSchema, fillForm, getAt, hasField, issuesToErrors, secretPaths, setAt, type EditRegistry, type FieldSpec } from '../lib/schema-form.js';
   import SchemaForm from './SchemaForm.svelte';
 
@@ -18,6 +19,8 @@
 
   const iid = $derived(settingsUi.instanceId);
   const instance = $derived(iid ? (pages.list.flatMap((p) => p.instances).find((i) => i.id === iid) ?? null) : null);
+  // Same rule as the tile host: the page's owner owns its instances.
+  const isOwner = $derived(!!iid && pages.list.some((p) => p.ownerId === session.me?.id && p.instances.some((i) => i.id === iid)));
   const entry = $derived(instance ? modules[instance.moduleId] : undefined);
   const name = $derived(entry ? t(`module.${entry.manifest.id}.name`, entry.manifest.name) : '');
 
@@ -160,7 +163,7 @@
       >
         {#if phase === 'custom' && custom}
           {@const Custom = custom}
-          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} api={moduleApi(instance.moduleId)} {t} {...userFormat()} />
+          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} api={moduleApi(instance.moduleId)} {t} {isOwner} {...userFormat()} />
         {:else}
           <SchemaForm {fields} value={form} {errors} onChange={(v) => (form = v)} {t} moduleId={instance.moduleId} {secretsSet} />
         {/if}
