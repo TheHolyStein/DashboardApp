@@ -1,69 +1,114 @@
 import { z } from 'zod';
-import { createSnapshotPusher, defineServer, newId, type SnapshotPusher } from '@dash/module-kit';
+import { DashError, type HostServices, type UserId } from '@dash/contract';
+import { defineServer } from '@dash/module-kit';
 import manifest from '../manifest.js';
+import {
+  accessLevel,
+  assertOwner,
+  createCalendar,
+  deleteCalendar,
+  ensurePersonal,
+  share,
+  sharesOf,
+  updateCalendar,
+  visibleCalendars,
+  type Access,
+  type CalendarRow,
+  type ShareLevel,
+} from './calendars.js';
+import { migrations } from './migrations.js';
 
-// Typed route body: with `body: NewItem`, `req.body` is z.infer<typeof NewItem> (the server answers 422 first).
-const NewItem = z.object({ label: z.string().trim().min(1).max(80) });
+const Color = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be #rrggbb');
+const Name = z.string().trim().min(1).max(80);
+const NewCalendar = z.object({ name: Name, color: Color });
+const PatchCalendar = z.object({ name: Name.optional(), color: Color.optional() });
+const Shares = z.object({
+  shares: z.array(z.object({ userId: z.string().min(1), level: z.enum(['view', 'edit']) })).max(100),
+});
 
-interface Row {
+export interface CalendarDto {
   id: string;
-  label: string;
+  name: string;
+  color: string;
+  kind: 'local' | 'subscription';
+  sourceUrl: string | null;
+  ownerId: string;
+  access: Exclude<Access, 'none'>;
+  /** Only the owner sees who a calendar is shared with. */
+  shares: Array<{ userId: string; level: ShareLevel }> | null;
 }
 
-// Per-host state (the snapshot pusher, caches) lives in this closure and is created in `setup`, never at module scope.
-function createServer() {
-  let pusher: SnapshotPusher | undefined;
-  const pusherOf = (): SnapshotPusher => {
-    if (!pusher) throw new Error('setup has not run');
-    return pusher;
+export function toCalendarDto(host: HostServices, row: CalendarRow, userId: UserId): CalendarDto {
+  const access = accessLevel(host.store.db, row.id, userId);
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    kind: row.kind,
+    sourceUrl: row.source_url,
+    ownerId: row.owner_id,
+    access: access === 'none' ? 'view' : access,
+    shares: access === 'owner' ? sharesOf(host.store.db, row.id) : null,
   };
+}
 
+function createServer() {
   return defineServer({
     manifest,
-    // One migration may hold several statements (the table and its index). Ids ascend from 1; never edit a shipped one.
-    migrations: [
-      {
-        id: 1,
-        up: `CREATE TABLE m_calendar_items (
-        id TEXT PRIMARY KEY,
-        label TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX m_calendar_items_created ON m_calendar_items (created_at);`,
-      },
-    ],
-    // jobs: { refresh: async ({ host, signal }) => { await abortable(signal, host.http.fetch(...)); } },   // keys must match manifest.jobs
-    // Runs once after migrations, before the first job, route or event handler. A throw marks the module failed.
-    setup(host) {
-      pusher = createSnapshotPusher(host);
+    migrations,
+    jobs: {
+      // TODO(C6): reminders, event.upcoming / event.started, day summary.
+      reminders: () => Promise.resolve(),
+      // TODO(C5): derived items (todo.create.request, pin.request, countdown.request, wled.apply.request).
+      derive: () => Promise.resolve(),
+      // TODO(C4): refresh read-only subscriptions through host.http.
+      subscriptions: () => Promise.resolve(),
     },
-    // teardown(host) { ... },   // optional: runs on shutdown before the database closes
     routes(r, host) {
-      const snapshot = (): { value: number; label: string } => {
-        const rows = host.store.db.all<Row>(
-          'SELECT id, label FROM m_calendar_items ORDER BY created_at DESC, id DESC',
-        );
-        return { value: rows.length, label: rows[0]?.label ?? 'Example' };
-      };
+      const db = host.store.db;
+      // TODO(plan 08): CalDAV. The core mounts these prefixes (manifest.rootMounts) and authenticates with an app password.
+      const notImplemented = (): Promise<{ status: number }> => Promise.resolve({ status: 501 });
+      r.raw('/dav', notImplemented);
+      r.raw('/.well-known/caldav', notImplemented);
 
-      r.get('/items', { level: 'view' }, () =>
-        host.store.db.all<Row>(
-          'SELECT id, label FROM m_calendar_items ORDER BY created_at DESC, id DESC LIMIT 100',
-        ),
-      );
-      r.post('/items', { level: 'edit', body: NewItem }, (req) => {
-        const id = newId(host.now()); // uuid v7, time-ordered; time comes from host.now()
-        host.store.db.run(
-          'INSERT INTO m_calendar_items (id, label, created_at) VALUES (?, ?, ?)',
-          [id, req.body.label, host.now().toISOString()],
-        );
-        pusherOf().push(null, snapshot()); // false (nothing sent) when the snapshot did not change
-        return { id };
+      r.get('/calendars', { level: 'view' }, (req) => {
+        ensurePersonal(db, req.user.id, host.now());
+        return { calendars: visibleCalendars(db, req.user.id).map((c) => toCalendarDto(host, c, req.user.id)) };
       });
-      r.delete('/items/:id', { level: 'edit' }, (req) => {
-        host.store.db.run('DELETE FROM m_calendar_items WHERE id = ?', [req.params['id']]);
-        pusherOf().push(null, snapshot());
-        return undefined; // 204, no body
+
+      r.post('/calendars', { level: 'edit', body: NewCalendar }, (req) => {
+        ensurePersonal(db, req.user.id, host.now());
+        const row = createCalendar(db, req.user.id, req.body, { now: host.now() });
+        return toCalendarDto(host, row, req.user.id);
+      });
+
+      r.patch('/calendars/:id', { level: 'edit', body: PatchCalendar }, (req) => {
+        const row = updateCalendar(db, req.params['id'] ?? '', req.user.id, req.body);
+        return toCalendarDto(host, row, req.user.id);
+      });
+
+      r.delete('/calendars/:id', { level: 'edit' }, (req) => {
+        deleteCalendar(db, req.params['id'] ?? '', req.user.id);
+        return undefined;
+      });
+
+      // Replaces the calendar's whole share list.
+      r.put('/calendars/:id/shares', { level: 'edit', body: Shares }, async (req) => {
+        const calendarId = req.params['id'] ?? '';
+        const known = new Set((await host.users()).map((u) => u.id));
+        const wanted = new Map<string, ShareLevel>();
+        for (const s of req.body.shares) {
+          if (!known.has(s.userId)) throw new DashError('invalid', `unknown user ${s.userId}`);
+          wanted.set(s.userId, s.level);
+        }
+        db.transaction(() => {
+          assertOwner(db, calendarId, req.user.id);
+          for (const current of sharesOf(db, calendarId)) {
+            if (!wanted.has(current.userId)) share(db, calendarId, req.user.id, current.userId, 'none');
+          }
+          for (const [userId, level] of wanted) share(db, calendarId, req.user.id, userId, level);
+        });
+        return { shares: sharesOf(db, calendarId) };
       });
     },
   });
