@@ -15,13 +15,14 @@
     clock?: () => number;
   };
 
-  let { data, settings, level, api, t, clock }: Props = $props();
+  let { data, settings, level, api, t, clock, locale }: Props = $props();
 
   const MAX_ZONES = 12;
   const MAX_TIMER_SEC = 86_400;
 
   // Zones are not part of the snapshot: they load through GET /zones.
   let zones = $state<string[]>([]);
+  let zonesLoaded = $state(false);
   let timers = $state<Timer[]>(untrack(() => data?.timers ?? []));
   let error = $state('');
   let zonesHeading = $state<HTMLElement>();
@@ -39,15 +40,26 @@
     heading?.focus();
   }
 
-  // A pushed snapshot replaces the list; the fetch on open fills in anything newer.
+  // A pushed snapshot replaces the list, then GET /timers settles it: a snapshot built before our own change can
+  // arrive after it, and the server's list is the one to trust. The first run is covered by the fetch on open.
+  let firstSnapshot = true;
   $effect(() => {
-    if (data?.timers) timers = data.timers;
+    if (!data?.timers) return;
+    timers = data.timers;
+    if (firstSnapshot) firstSnapshot = false;
+    else void untrack(() => api.get<Timer[]>('/timers')).then((list) => (timers = list), () => undefined);
   });
 
   onMount(() => {
     api.get<string[]>('/zones').then(
-      (list) => (zones = list),
-      () => (error = t('m.clock.loadFailed', 'Could not load the saved data.')),
+      (list) => {
+        zones = list;
+        zonesLoaded = true;
+      },
+      () => {
+        zonesLoaded = true;
+        error = t('m.clock.loadFailed', 'Could not load the saved data.');
+      },
     );
     api.get<Timer[]>('/timers').then(
       (list) => (timers = list),
@@ -126,7 +138,8 @@
     creating = true;
     try {
       const created = await api.post<Timer>('/timers', { label: label.trim(), durationSec });
-      timers = [...timers, created].sort((a, b) => a.endsAt.localeCompare(b.endsAt));
+      // The pushed snapshot may already have delivered it.
+      timers = [...timers.filter((x) => x.id !== created.id), created].sort((a, b) => a.endsAt.localeCompare(b.endsAt));
       label = '';
     } catch (err) {
       error = failure(err);
@@ -160,14 +173,16 @@
 
   <section aria-labelledby="clock-zones">
     <h3 id="clock-zones" tabindex="-1" bind:this={zonesHeading}>{t('m.clock.worldClocks', 'World clocks')}</h3>
-    {#if zones.length === 0}
+    {#if !zonesLoaded}
+      <p class="loading" aria-busy="true">{t('m.clock.loading', 'Loading…')}</p>
+    {:else if zones.length === 0}
       <Empty text={t('m.clock.noZones', 'No world clocks yet.')} />
     {:else}
       <ul class="rows zones">
         {#each zones as zone (zone)}
           <li>
             <span class="name" data-value>{zone}</span>
-            <time class="value" data-value>{formatTime(now, { timeZone: zone, hour12: settings.hour12, seconds: false })}</time>
+            <time class="value" data-value>{formatTime(now, { locale, timeZone: zone, hour12: settings.hour12, seconds: false })}</time>
             {#if level === 'edit'}
               <Button
                 data-edit
@@ -207,7 +222,7 @@
       <ul class="rows">
         {#each timers as timer (timer.id)}
           <li>
-            <span class="name">{#if timer.label}{timer.label}{:else}{t('m.clock.timer', 'Timer')}{/if}</span>
+            <span class="name">{#if timer.label}<span data-user>{timer.label}</span>{:else}{t('m.clock.timer', 'Timer')}{/if}</span>
             <span class="value" data-value>{formatRemaining(Date.parse(timer.endsAt) - now.getTime())}</span>
             {#if level === 'edit'}
               <Button
@@ -316,6 +331,10 @@
   }
   input[type='number'] {
     width: 6rem;
+  }
+  .loading {
+    margin: 0;
+    color: var(--db-muted);
   }
   .error {
     margin: 0;

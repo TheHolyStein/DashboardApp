@@ -25,11 +25,16 @@ const hasConfig = (mod: LoadedModule): boolean =>
  * `GET /api/admin/modules`, `GET|PUT /api/admin/modules/:id/config`, `PUT /api/admin/modules/:id/enabled`.
  * Disabling flips `mod.enabled` (the router reads it per request), re-registers the module with the scheduler (which
  * then drops its jobs), and tells every user's streams (`revoked` for the module plus a `layout` event for each
- * affected page); enabling does the reverse. `Stream.disconnectUser(user, module)` is deliberately not used: it mutes
+ * affected page); enabling does the reverse. A module that was disabled when the server started was never set up
+ * (the loader only runs `setup` for enabled modules): enabling it runs `setup(host)` first. If that throws, the module
+ * stays disabled and is marked failed (like a load failure), the error is logged, and the request answers
+ * 500 `internal` with the message "Module setup failed: <reason>", which the admin screen shows. A restart retries. `Stream.disconnectUser(user, module)` is deliberately not used: it mutes
  * the module on open connections until they reconnect, which would hide a re-enabled module.
  */
 export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModuleDeps): void {
   const { db, auth } = deps;
+  // Modules the loader set up (enabled and not failed at registration); later ones are set up on first enable.
+  const setUp = new Set(deps.modules.filter((m) => m.failed === undefined && m.enabled).map((m) => m.id));
 
   const find = (id: string): LoadedModule => {
     const mod = moduleOf(deps, id);
@@ -81,10 +86,22 @@ export function registerAdminModuleRoutes(app: FastifyInstance, deps: AdminModul
     return config;
   });
 
-  secured(app, auth, 'PUT', '/api/admin/modules/:id/enabled', (user, req) => {
+  secured(app, auth, 'PUT', '/api/admin/modules/:id/enabled', async (user, req) => {
     requireAdmin(user);
     const mod = find((req.params as { id: string }).id);
     const { enabled } = parseWith(EnabledBody, req.body);
+    if (enabled && !setUp.has(mod.id)) {
+      try {
+        await mod.server.setup?.(mod.host);
+        setUp.add(mod.id);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        mod.enabled = false;
+        mod.failed = `setup failed: ${reason}`;
+        deps.logger.error({ module: mod.id, reason }, 'module setup failed on enable');
+        throw new DashError('internal', `Module setup failed: ${reason}`);
+      }
+    }
     db.prepare(
       `INSERT INTO module_state (module_id, enabled) VALUES (?, ?)
        ON CONFLICT(module_id) DO UPDATE SET enabled = excluded.enabled`,

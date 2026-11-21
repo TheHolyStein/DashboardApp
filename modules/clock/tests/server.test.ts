@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { ModuleInstance } from '@dash/contract';
-import { applyMigrations, createMockHost, createMockRouter, runServerContractSuite } from '@dash/module-kit/testing';
+import { createMockHostWithSetup, createMockRouter, runServerContractSuite } from '@dash/module-kit/testing';
 import server from '../server/index.js';
 import { MAX_ACTIVE, createTimer, dueTimers, listTimers, markFired, purgeFired } from '../server/timers.js';
 import type { Snapshot } from '../manifest.js';
@@ -10,10 +10,11 @@ runServerContractSuite(server, { moduleDir: import.meta.dirname + '/..' });
 const START = new Date('2026-01-01T12:00:00.000Z');
 const inst = (id: string, ownerId: string): ModuleInstance => ({ id, ownerId, pageId: 'p1', settings: {} });
 
-function setup() {
-  const host = createMockHost(server.manifest, { now: START });
-  applyMigrations(host, server.migrations ?? []);
-  host.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), inst('i3', 'u1')]);
+async function setup() {
+  const host = await createMockHostWithSetup(server, {
+    now: START,
+    prepare: (h) => h.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), inst('i3', 'u1')]),
+  });
   const router = createMockRouter(server, host);
   const tick = () => server.jobs!['tick']!({ host, instance: null, signal: new AbortController().signal });
   const pushedTo = (id: string) => host.pushed.filter((p) => p.instanceId === id);
@@ -21,8 +22,8 @@ function setup() {
 }
 
 describe('timers logic', () => {
-  test('createTimer rejects 0 and 86401', () => {
-    const { db } = setup();
+  test('createTimer rejects 0 and 86401', async () => {
+    const { db } = await setup();
     expect(() => createTimer(db, 'u1', { label: 'x', durationSec: 0 }, START)).toThrowError(/invalid/);
     expect(() => createTimer(db, 'u1', { label: 'x', durationSec: 86_401 }, START)).toThrowError(/invalid/);
     expect(() => createTimer(db, 'u1', { label: 'x', durationSec: 1.5 }, START)).toThrowError(/invalid/);
@@ -34,8 +35,8 @@ describe('timers logic', () => {
     });
   });
 
-  test('dueTimers returns only unfired past timers', () => {
-    const { db } = setup();
+  test('dueTimers returns only unfired past timers', async () => {
+    const { db } = await setup();
     const past = createTimer(db, 'u1', { label: 'past', durationSec: 10 }, START);
     const fired = createTimer(db, 'u1', { label: 'fired', durationSec: 10 }, START);
     createTimer(db, 'u1', { label: 'future', durationSec: 100 }, START);
@@ -45,8 +46,8 @@ describe('timers logic', () => {
     expect(dueTimers(db, START)).toEqual([]);
   });
 
-  test('listTimers is the active timers of one owner ordered by end', () => {
-    const { db } = setup();
+  test('listTimers is the active timers of one owner ordered by end', async () => {
+    const { db } = await setup();
     const late = createTimer(db, 'u1', { label: 'late', durationSec: 300 }, START);
     const soon = createTimer(db, 'u1', { label: 'soon', durationSec: 60 }, START);
     createTimer(db, 'u2', { label: 'other', durationSec: 60 }, START);
@@ -58,7 +59,7 @@ describe('timers logic', () => {
 
 describe('tick job', () => {
   test('tick publishes timer.finished once per timer and notifies its owner', async () => {
-    const { host, db, tick } = setup();
+    const { host, db, tick } = await setup();
     const t = createTimer(db, 'u2', { label: 'Pasta', durationSec: 30 }, START);
     createTimer(db, 'u1', { label: '', durationSec: 60 }, START);
     host.advance(30_000);
@@ -78,7 +79,7 @@ describe('tick job', () => {
   });
 
   test('an unlabelled timer notifies with a default title', async () => {
-    const { host, db, tick } = setup();
+    const { host, db, tick } = await setup();
     createTimer(db, 'u1', { label: '', durationSec: 5 }, START);
     host.advance(5_000);
     await tick();
@@ -86,7 +87,7 @@ describe('tick job', () => {
   });
 
   test('a firing timer drops out of its owner snapshots only', async () => {
-    const { host, db, tick, pushedTo } = setup();
+    const { host, db, tick, pushedTo } = await setup();
     createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
     await tick(); // startup push
     host.pushed.length = 0;
@@ -99,7 +100,7 @@ describe('tick job', () => {
   });
 
   test('first tick pushes every instance once, a tick with nothing due pushes nothing', async () => {
-    const { host, tick } = setup();
+    const { host, tick } = await setup();
     await tick();
     expect(host.pushed.map((p) => p.instanceId).sort()).toEqual(['i1', 'i2', 'i3']);
     host.pushed.length = 0;
@@ -111,7 +112,7 @@ describe('tick job', () => {
   });
 
   test('a past nextEvent is cleared at the next tick', async () => {
-    const { host, tick, pushedTo } = setup();
+    const { host, tick, pushedTo } = await setup();
     await server.on!['calendar.event.upcoming']!(
       { uid: 'e', title: 'Dentist', start: '2026-01-01T12:10:00.000Z', minutesUntil: 10, userIds: ['u1'] },
       host,
@@ -130,7 +131,7 @@ describe('calendar.event.upcoming', () => {
   const upcoming = (title: string, start: string, userIds: string[]) => ({ uid: title, title, start, minutesUntil: 5, userIds });
 
   test('calendar.event.upcoming stores nextEvent per user and pushes it only to that user\'s instances', async () => {
-    const { host, pushedTo } = setup();
+    const { host, pushedTo } = await setup();
     await server.on!['calendar.event.upcoming']!(upcoming('Dentist', '2026-01-01T12:30:00.000Z', ['u1']), host);
     expect(await host.store.get('next:u1')).toEqual({ title: 'Dentist', start: '2026-01-01T12:30:00.000Z' });
     expect(await host.store.get('next:u2')).toBeUndefined();
@@ -142,7 +143,7 @@ describe('calendar.event.upcoming', () => {
   });
 
   test('keeps the soonest upcoming event', async () => {
-    const { host } = setup();
+    const { host } = await setup();
     const on = server.on!['calendar.event.upcoming']!;
     await on(upcoming('Later', '2026-01-01T14:00:00.000Z', ['u1']), host);
     await on(upcoming('Sooner', '2026-01-01T13:00:00.000Z', ['u1']), host);
@@ -154,7 +155,7 @@ describe('calendar.event.upcoming', () => {
   });
 
   test('ignores events already started and unparsable starts', async () => {
-    const { host } = setup();
+    const { host } = await setup();
     const on = server.on!['calendar.event.upcoming']!;
     await on(upcoming('Past', '2026-01-01T11:00:00.000Z', ['u1']), host);
     await on(upcoming('Junk', 'soon', ['u1']), host);
@@ -165,7 +166,7 @@ describe('calendar.event.upcoming', () => {
 
 describe('onInstanceChange', () => {
   test('added pushes the new instance snapshot immediately', async () => {
-    const { host, db } = setup();
+    const { host, db } = await setup();
     createTimer(db, 'u1', { label: 'tea', durationSec: 60 }, START);
     host.setInstances([inst('i9', 'u1')]); // the host lists an instance by the time it reports it added
     await server.onInstanceChange!('added', inst('i9', 'u1'), host);
@@ -176,7 +177,7 @@ describe('onInstanceChange', () => {
 
 describe('tick hardening', () => {
   test('a removed instance is forgotten: no push while gone, a fresh push when it returns', async () => {
-    const { host, router, tick, pushedTo } = setup();
+    const { host, router, tick, pushedTo } = await setup();
     await tick();
     host.pushed.length = 0;
     host.setInstances([inst('i2', 'u2'), inst('i3', 'u1')]); // i1 removed
@@ -192,7 +193,7 @@ describe('tick hardening', () => {
   });
 
   test('an instance removed while the tick builds snapshots is not pushed', async () => {
-    const { host, db, tick, pushedTo } = setup();
+    const { host, db, tick, pushedTo } = await setup();
     createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
     await tick();
     host.pushed.length = 0;
@@ -210,7 +211,7 @@ describe('tick hardening', () => {
   });
 
   test('calendar.event.upcoming for two users pushes each user\'s instances separately and nothing to a third', async () => {
-    const { host, pushedTo } = setup();
+    const { host, pushedTo } = await setup();
     host.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), inst('i3', 'u1'), inst('i4', 'u3')]);
     const on = server.on!['calendar.event.upcoming']!;
     await on({ uid: 'a', title: 'A', start: '2026-01-01T12:30:00.000Z', minutesUntil: 30, userIds: ['u1'] }, host);
@@ -222,7 +223,7 @@ describe('tick hardening', () => {
   });
 
   test('the 51st running timer of one owner is refused with a clear message; others are unaffected', async () => {
-    const { router, db } = setup();
+    const { router, db } = await setup();
     for (let i = 0; i < MAX_ACTIVE; i++) createTimer(db, 'u1', { label: `t${i}`, durationSec: 600 }, START);
     const res = await router.call('POST', '/timers', { level: 'edit', body: { label: 'one too many', durationSec: 60 } });
     expect(res.status).toBe(422);
@@ -231,7 +232,7 @@ describe('tick hardening', () => {
   });
 
   test('fired rows older than a day are purged by tick, at most once an hour', async () => {
-    const { host, db, tick } = setup();
+    const { host, db, tick } = await setup();
     const old = createTimer(db, 'u1', { label: 'old', durationSec: 5 }, START);
     markFired(db, old.id);
     const count = () => db.get<{ n: number }>('SELECT COUNT(*) AS n FROM m_clock_timers')!.n;
@@ -252,7 +253,7 @@ describe('tick hardening', () => {
   });
 
   test('a publish that throws for one timer does not stop the next timer from firing', async () => {
-    const { host, db, tick, pushedTo } = setup();
+    const { host, db, tick, pushedTo } = await setup();
     const a = createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
     const b = createTimer(db, 'u2', { label: 'b', durationSec: 6 }, START);
     await tick();
@@ -274,7 +275,7 @@ describe('tick hardening', () => {
   });
 
   test('an idle tick makes no instances() call and no kv scan', async () => {
-    const { host, tick } = setup();
+    const { host, tick } = await setup();
     await tick();
     const instances = vi.spyOn(host, 'instances');
     const keys = vi.spyOn(host.store, 'keys');
@@ -286,9 +287,90 @@ describe('tick hardening', () => {
   });
 });
 
+describe('next-event flag and startup', () => {
+  const upcoming = (title: string, start: string, userIds: string[]) => ({ uid: title, title, start, minutesUntil: 5, userIds });
+
+  test('a stored next: key at startup is rebuilt by the first tick and later expired', async () => {
+    const { host, tick } = await setup();
+    await host.store.set('next:u1', { title: 'Old', start: '2026-01-01T12:10:00.000Z' });
+    await tick(); // hasNext was unknown: the scan finds the key
+    host.advance(11 * 60_000);
+    await tick();
+    expect(await host.store.get('next:u1')).toBeUndefined();
+  });
+
+  test('an event arriving between idle ticks is expired by a later tick', async () => {
+    const { host, tick } = await setup();
+    await tick();
+    host.advance(5_000);
+    await tick(); // idle
+    await server.on!['calendar.event.upcoming']!(upcoming('Dentist', '2026-01-01T12:10:00.000Z', ['u1']), host);
+    host.advance(11 * 60_000);
+    await tick();
+    expect(await host.store.get('next:u1')).toBeUndefined();
+  });
+
+  test('a handler write during a tick scan is not lost', async () => {
+    const { host, tick } = await setup();
+    await server.on!['calendar.event.upcoming']!(upcoming('First', '2026-01-01T12:10:00.000Z', ['u1']), host);
+    await tick();
+    host.advance(11 * 60_000); // First has started; the next tick deletes it
+    const realGet = host.store.get.bind(host.store);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    host.store.get = async <T>(key: string) => {
+      if (first && key === 'next:u1') {
+        first = false;
+        await gate; // the scan is parked on its first read
+      }
+      return realGet<T>(key);
+    };
+    const running = tick();
+    await vi.waitFor(() => expect(first).toBe(false)); // the scan is parked
+    await server.on!['calendar.event.upcoming']!(upcoming('Second', '2026-01-01T12:40:00.000Z', ['u2']), host);
+    release();
+    await running;
+    host.store.get = realGet;
+    expect(await host.store.get('next:u1')).toBeUndefined();
+    host.advance(30 * 60_000); // Second has started: only a flag that survived the scan lets this tick expire it
+    await tick();
+    expect(await host.store.get('next:u2')).toBeUndefined();
+  });
+
+  test('a failed startup push is retried: the module is not started until a push succeeded', async () => {
+    const { host, tick } = await setup();
+    const real = host.instances.bind(host);
+    let fail = true;
+    host.instances = async <S>() => {
+      if (fail) throw new Error('db busy');
+      return real<S>();
+    };
+    await expect(tick()).rejects.toThrow('db busy');
+    fail = false;
+    await tick();
+    expect(host.pushed.map((p) => p.instanceId).sort()).toEqual(['i1', 'i2', 'i3']);
+  });
+
+  test('a purge failure is logged and does not stop due timers', async () => {
+    const { host, db, tick } = await setup();
+    createTimer(db, 'u1', { label: 'a', durationSec: 5 }, START);
+    const real = db.run.bind(db);
+    vi.spyOn(db, 'run').mockImplementation((sql: string, params?: unknown[]) => {
+      if (sql.startsWith('DELETE')) throw new Error('disk full');
+      return real(sql, params);
+    });
+    const error = vi.spyOn(host.log, 'error');
+    host.advance(5_000);
+    await tick();
+    expect(error).toHaveBeenCalledWith('clock: purging fired timers failed', expect.anything());
+    expect(host.notified).toHaveLength(1);
+  });
+});
+
 describe('routes', () => {
   test('GET /timers returns only the caller\'s active timers', async () => {
-    const { router, db } = setup();
+    const { router, db } = await setup();
     createTimer(db, 'u1', { label: 'mine', durationSec: 60 }, START);
     createTimer(db, 'u2', { label: 'theirs', durationSec: 60 }, START);
     const res = await router.call('GET', '/timers', { level: 'view' });
@@ -299,7 +381,7 @@ describe('routes', () => {
   });
 
   test('POST creates and pushes updated snapshot', async () => {
-    const { host, router, pushedTo } = setup();
+    const { host, router, pushedTo } = await setup();
     const res = await router.call('POST', '/timers', { level: 'edit', body: { label: 'Eggs', durationSec: 420 } });
     expect(res.status).toBe(200);
     const created = res.body as { id: string };
@@ -312,7 +394,7 @@ describe('routes', () => {
   });
 
   test('POST rejects a label over 40 characters and a bad duration with 422', async () => {
-    const { host, router } = setup();
+    const { host, router } = await setup();
     const long = await router.call('POST', '/timers', { level: 'edit', body: { label: 'x'.repeat(41), durationSec: 5 } });
     const zero = await router.call('POST', '/timers', { level: 'edit', body: { label: 'x', durationSec: 0 } });
     const nan = await router.call('POST', '/timers', { level: 'edit', body: { label: 'x' } });
@@ -321,14 +403,14 @@ describe('routes', () => {
   });
 
   test('view level POST → 403', async () => {
-    const { host, router } = setup();
+    const { host, router } = await setup();
     const res = await router.call('POST', '/timers', { level: 'view', body: { label: 'x', durationSec: 5 } });
     expect(res.status).toBe(403);
     expect(listTimers(host.store.db, 'u1', START)).toEqual([]);
   });
 
   test('DELETE removes the caller\'s timer and pushes', async () => {
-    const { host, router, db } = setup();
+    const { host, router, db } = await setup();
     const t = createTimer(db, 'u1', { label: 'mine', durationSec: 60 }, START);
     const res = await router.call('DELETE', `/timers/${t.id}`, { level: 'edit' });
     expect(res.status).toBe(204); // the mock router answers 204 for undefined, like the real one
@@ -338,7 +420,7 @@ describe('routes', () => {
   });
 
   test('DELETE of another user\'s timer → 404', async () => {
-    const { host, router, db } = setup();
+    const { host, router, db } = await setup();
     const t = createTimer(db, 'u2', { label: 'theirs', durationSec: 60 }, START);
     const res = await router.call('DELETE', `/timers/${t.id}`, { level: 'edit', user: { id: 'u1' } });
     expect(res.status).toBe(404);
@@ -350,12 +432,12 @@ describe('routes', () => {
 
 describe('zones routes', () => {
   test('GET /zones is empty by default, per user', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     expect(await router.call('GET', '/zones', { level: 'view' })).toEqual({ status: 200, body: [] });
   });
 
   test('PUT /zones stores the list for the caller only', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     const put = await router.call('PUT', '/zones', { level: 'edit', body: { zones: ['Europe/Berlin', 'UTC'] } });
     expect(put).toEqual({ status: 200, body: ['Europe/Berlin', 'UTC'] });
     expect((await router.call('GET', '/zones', { level: 'view' })).body).toEqual(['Europe/Berlin', 'UTC']);
@@ -363,7 +445,7 @@ describe('zones routes', () => {
   });
 
   test('PUT /zones dedupes and keeps order', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     const put = await router.call('PUT', '/zones', {
       level: 'edit',
       body: { zones: ['Asia/Tokyo', 'UTC', 'Asia/Tokyo'] },
@@ -372,21 +454,21 @@ describe('zones routes', () => {
   });
 
   test('invalid zone rejected with 422', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     const res = await router.call('PUT', '/zones', { level: 'edit', body: { zones: ['Europe/Berlin', 'Mars/Base'] } });
     expect(res.status).toBe(422);
     expect((await router.call('GET', '/zones', { level: 'view' })).body).toEqual([]);
   });
 
   test('PUT /zones accepts 12 entries and rejects 13 with 422', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     const all = Intl.supportedValuesOf('timeZone');
     expect((await router.call('PUT', '/zones', { level: 'edit', body: { zones: all.slice(0, 12) } })).status).toBe(200);
     expect((await router.call('PUT', '/zones', { level: 'edit', body: { zones: all.slice(0, 13) } })).status).toBe(422);
   });
 
   test('PUT /zones needs level edit', async () => {
-    const { router } = setup();
+    const { router } = await setup();
     expect((await router.call('PUT', '/zones', { level: 'view', body: { zones: [] } })).status).toBe(403);
   });
 });

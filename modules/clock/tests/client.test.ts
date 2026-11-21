@@ -80,6 +80,21 @@ describe('Tile', () => {
     expect(screen.getByText('21:00')).toBeTruthy(); // 12:00 UTC is 21:00 in Tokyo
   });
 
+  test('an empty zone setting formats with the user locale and time zone from the props', () => {
+    const { container } = render(client.Tile, { props: tileProps({ locale: 'de-DE', timeZone: 'Asia/Kolkata', settings: { ...settings, timeZone: '' } }) });
+    expect(container.querySelector('time')?.textContent).toBe('17:30'); // 12:00 UTC is 17:30 in India
+    expect(container.querySelector('.date')?.textContent).toMatch(/^Do\.?,? 1\. Jan/); // German weekday and day order
+  });
+
+  test('timer labels, the tile label and the event title are marked as user content', () => {
+    const nextEvent = { title: 'Standup', start: new Date(Date.parse(START) + 25 * 60_000).toISOString() };
+    const { container } = render(client.Tile, {
+      props: tileProps({ data: { timers: [timer('a', 'Tea', 60)], nextEvent }, settings: { ...settings, label: 'Home' } }),
+    });
+    const user = [...container.querySelectorAll('[data-user]')].map((e) => e.textContent);
+    expect(user.sort()).toEqual(['Home', 'Standup', 'Tea']);
+  });
+
   test('unknown face id falls back to theme default', async () => {
     const clockFace = vi.fn((id?: string) => (id === 'nope' ? Promise.reject(new Error('no such face')) : Promise.resolve(Face)));
     render(client.Tile, {
@@ -388,6 +403,77 @@ describe('Detail', () => {
     expect(calls).toEqual([[...ZONES, 'UTC'], ['Europe/Berlin', 'America/New_York', 'UTC']]);
     expect(screen.queryByRole('button', { name: 'Remove Asia/Tokyo' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Remove UTC' })).toBeTruthy();
+  });
+
+  test('a failed zone save followed by another edit still applies the second edit', async () => {
+    const calls: string[][] = [];
+    const put = vi.fn((_p: string, body: unknown) => {
+      const zones = (body as { zones: string[] }).zones;
+      calls.push(zones);
+      return calls.length === 1 ? Promise.reject(new Error('offline')) : Promise.resolve(zones);
+    });
+    const { container } = render(client.Detail, { props: props({ api: emptyApi({ put: put as ModuleApi['put'] }) }) });
+    await vi.advanceTimersByTimeAsync(0);
+    await fireEvent.change(container.querySelector('select')!, { target: { value: 'UTC' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole('alert').textContent).toContain('Could not save');
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove Asia/Tokyo' }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([[...ZONES, 'UTC'], ['Europe/Berlin', 'America/New_York']]); // the failed add left no trace
+    expect(screen.queryByRole('button', { name: 'Remove Asia/Tokyo' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  test('the zone list shows a loading state until GET /zones answers, then the list', async () => {
+    let answer: (list: string[]) => void = () => undefined;
+    const get = vi.fn((path: string) => (path === '/zones' ? new Promise<string[]>((r) => (answer = r)) : Promise.resolve(detailData.timers)));
+    render(client.Detail, { props: props({ api: emptyApi({ get: get as ModuleApi['get'] }) }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.queryByText('No world clocks yet.')).toBeNull();
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    answer([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(screen.getByText('No world clocks yet.')).toBeTruthy();
+  });
+
+  test('world clocks use the user locale; timer labels are user content', async () => {
+    const get = vi.fn((path: string) => Promise.resolve(path === '/zones' ? ['Asia/Kolkata'] : detailData.timers));
+    const { container } = render(client.Detail, { props: props({ locale: 'de-DE', timeZone: 'Asia/Kolkata', api: emptyApi({ get: get as ModuleApi['get'] }) }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(container.querySelector('.zones time')?.textContent).toBe('17:30');
+    expect(container.querySelectorAll('.name [data-user]').length).toBeGreaterThan(0);
+  });
+
+  test('a pushed snapshot that is older than our own change is corrected by the server list', async () => {
+    const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
+    const api = emptyApi({
+      get: vi.fn((path: string) => Promise.resolve(path === '/zones' ? ZONES : [...detailData.timers, created])) as ModuleApi['get'],
+      post: vi.fn(() => Promise.resolve(created)) as ModuleApi['post'],
+    });
+    const { container, rerender } = render(client.Detail, { props: props({ api }) });
+    await vi.advanceTimersByTimeAsync(0);
+    await fireEvent.input(container.querySelector('input[name=label]')!, { target: { value: 'Tea' } });
+    await fireEvent.submit(container.querySelector('form')!);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
+    await rerender(props({ api, data: { ...detailData, timers: detailData.timers.slice(0, 1) } })); // a stale push
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole('button', { name: 'Cancel Tea' })).toBeTruthy();
+  });
+
+  test('a snapshot that already holds the created timer does not show it twice', async () => {
+    const created = { id: 'new', label: 'Tea', endsAt: new Date(Date.parse(START) + 90_000).toISOString(), durationSec: 90 };
+    let answer: (t: typeof created) => void = () => undefined;
+    const api = emptyApi({ post: vi.fn(() => new Promise<typeof created>((resolve) => (answer = resolve))) as ModuleApi['post'] });
+    const { container, rerender } = render(client.Detail, { props: props({ api }) });
+    await vi.advanceTimersByTimeAsync(0);
+    await fireEvent.submit(container.querySelector('form')!);
+    await rerender(props({ api, data: { ...detailData, timers: [...detailData.timers, created] } })); // the push beats the response
+    answer(created);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getAllByRole('button', { name: 'Cancel Tea' })).toHaveLength(1);
   });
 
   test('focus moves to the list heading after removing a zone or cancelling a timer', async () => {

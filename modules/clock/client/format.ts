@@ -1,19 +1,13 @@
 // Formatting helpers shared by the Clock tile and detail. Pure; no module state beyond the formatter cache.
 
-/**
- * The locale to format with. The shell does not hand the user's saved locale (`MeDto.prefs.locale`) to
- * modules, so this is the browser's. Replace it with the contract value once `TileProps` carries one.
- */
-export const currentLocale = (): string => (typeof navigator !== 'undefined' && navigator.language) || 'en';
-
 const formatters = new Map<string, Intl.DateTimeFormat>();
-let warned = false;
 
 /**
  * A cached `Intl.DateTimeFormat` per (locale, options incl. zone). An unknown stored zone (or locale) makes the
- * constructor throw a `RangeError`: fall back to UTC (and the default locale) and say so once, so a render never crashes.
+ * constructor throw a `RangeError`: fall back to UTC (and the default locale) so a render never crashes. The
+ * fallback is cached under the same key, so the warning appears once per failing (locale, zone) pair.
  */
-export function dateFormatter(options: Intl.DateTimeFormatOptions, locale: string = currentLocale()): Intl.DateTimeFormat {
+export function dateFormatter(options: Intl.DateTimeFormatOptions, locale: string): Intl.DateTimeFormat {
   const key = `${locale}|${JSON.stringify(options)}`;
   let f = formatters.get(key);
   if (!f) {
@@ -21,10 +15,7 @@ export function dateFormatter(options: Intl.DateTimeFormatOptions, locale: strin
       f = new Intl.DateTimeFormat(locale, options);
     } catch (err) {
       if (!(err instanceof RangeError)) throw err;
-      if (!warned) {
-        warned = true;
-        console.warn(`clock: cannot format with locale "${locale}" / zone "${options.timeZone ?? ''}", using UTC`);
-      }
+      console.warn(`clock: cannot format with locale "${locale}" / zone "${options.timeZone ?? ''}", using UTC`);
       try {
         f = new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' });
       } catch {
@@ -36,23 +27,20 @@ export function dateFormatter(options: Intl.DateTimeFormatOptions, locale: strin
   return f;
 }
 
-/** IANA zone of the viewer's device. */
-export const userZone = (): string => dateFormatter({}).resolvedOptions().timeZone;
-
-/** Wall-clock text for `timeZone`: `HH:mm` (with seconds when asked), in the viewer's locale. */
-export function formatTime(now: Date, o: { timeZone: string; hour12: boolean; seconds: boolean }): string {
+/** Wall-clock text for `timeZone`: `HH:mm` (with seconds when asked), in the user's locale. */
+export function formatTime(now: Date, o: { locale: string; timeZone: string; hour12: boolean; seconds: boolean }): string {
   return dateFormatter({
     hour: '2-digit',
     minute: '2-digit',
     second: o.seconds ? '2-digit' : undefined,
     hourCycle: o.hour12 ? 'h12' : 'h23',
     timeZone: o.timeZone,
-  }).format(now);
+  }, o.locale).format(now);
 }
 
 /** Short date for `timeZone`, e.g. "Thu, 1 Jan". */
-export function formatDate(now: Date, timeZone: string): string {
-  return dateFormatter({ weekday: 'short', day: 'numeric', month: 'short', timeZone }).format(now);
+export function formatDate(now: Date, o: { locale: string; timeZone: string }): string {
+  return dateFormatter({ weekday: 'short', day: 'numeric', month: 'short', timeZone: o.timeZone }, o.locale).format(now);
 }
 
 /** `m:ss`, or `h:mm:ss` from one hour up. Negative input is clamped to 0. */

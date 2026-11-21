@@ -1,4 +1,4 @@
-import { DashError, type HostServices } from '@dash/contract';
+import { DashError } from '@dash/contract';
 import { abortable, createSnapshotPusher, defineServer, type SnapshotPusher } from '@dash/module-kit';
 import manifest from '../manifest.js';
 import { nextKey, pushSnapshots, type NextEvent } from './snapshot.js';
@@ -7,22 +7,23 @@ import { createTimer, deleteTimer, dueTimers, listTimers, markFired, purgeFired,
 
 const PURGE_EVERY_MS = 3_600_000;
 
-/** Per-host working state: the snapshot pusher and two cheap flags that let an idle tick return early. */
+/** Working state of one set-up host: the snapshot pusher and a few cheap flags that let an idle tick return early. */
 interface State {
-  host: HostServices;
   pusher: SnapshotPusher;
-  /** False until the first tick has pushed every instance once. */
+  /** False until the first tick has pushed every instance once (and that push succeeded). */
   started: boolean;
   /** Whether any `next:<user>` key may exist; null until the first tick rebuilds it from the store. */
   hasNext: boolean | null;
+  /** Bumped on every `next:` write; a scan only trusts its own "nothing left" result when this did not move meanwhile. */
+  nextSeq: number;
   lastPurge: number;
 }
 
 function createClockServer() {
-  // One registration serves one host; the slot is rebuilt when a different host (a test, a restart) shows up.
+  // Created in `setup(host)`, which the loader runs once before any job, handler or route.
   let state: State | undefined;
-  const stateFor = (host: HostServices): State => {
-    if (state?.host !== host) state = { host, pusher: createSnapshotPusher(host), started: false, hasNext: null, lastPurge: 0 };
+  const need = (): State => {
+    if (!state) throw new Error('clock: setup has not run');
     return state;
   };
 
@@ -46,18 +47,30 @@ function createClockServer() {
       },
     ],
 
+    setup(host) {
+      state = { pusher: createSnapshotPusher(host), started: false, hasNext: null, nextSeq: 0, lastPurge: 0 };
+    },
+
     jobs: {
       // Every 5 s: fire due timers, drop past next-events, push snapshots that changed. Idle ticks return early.
       tick: async ({ host, signal }) => {
-        const s = stateFor(host);
+        const s = need();
         const now = host.now();
         const db = host.store.db;
 
         if (now.getTime() - s.lastPurge >= PURGE_EVERY_MS) {
           s.lastPurge = now.getTime();
-          purgeFired(db, now);
+          try {
+            purgeFired(db, now);
+          } catch (err) {
+            host.log.error('clock: purging fired timers failed', { err: String(err) });
+          }
         }
-        s.hasNext ??= (await abortable(signal, host.store.keys('next:'))).length > 0;
+        if (s.hasNext === null) {
+          const found = (await abortable(signal, host.store.keys('next:'))).length > 0;
+          // A handler that wrote meanwhile already set it to true: only fill in an unknown value.
+          if (s.hasNext === null) s.hasNext = found;
+        }
 
         const due = dueTimers(db, now);
         if (s.started && due.length === 0 && !s.hasNext) return; // nothing to fire, nothing to expire
@@ -86,6 +99,7 @@ function createClockServer() {
         }
 
         if (s.hasNext) {
+          const seq = s.nextSeq;
           const keys = await abortable(signal, host.store.keys('next:'));
           let remaining = keys.length;
           for (const key of keys) {
@@ -96,18 +110,19 @@ function createClockServer() {
               dirty = true;
             }
           }
-          s.hasNext = remaining > 0;
+          // A handler write during the scan may not be in `keys`: then only the handler knows, keep the flag.
+          if (s.nextSeq === seq) s.hasNext = remaining > 0;
         }
 
         if (!dirty) return;
-        s.started = true;
         await pushSnapshots(host, s.pusher, await abortable(signal, host.instances()), signal);
+        s.started = true; // only after the push succeeded, so a failed startup push is retried
       },
     },
 
     on: {
       'calendar.event.upcoming': async (event, host) => {
-        const s = stateFor(host);
+        const s = need();
         const start = Date.parse(event.start);
         const nowMs = host.now().getTime();
         if (Number.isNaN(start) || start <= nowMs) return;
@@ -119,8 +134,10 @@ function createClockServer() {
           // started, or the new one is earlier.
           const storedStart = stored ? Date.parse(stored.start) : Number.NaN;
           if (stored && storedStart > nowMs && storedStart <= start) continue;
-          await host.store.set(nextKey(userId), { title: event.title, start: event.start });
+          s.nextSeq++;
           s.hasNext = true;
+          await host.store.set(nextKey(userId), { title: event.title, start: event.start });
+          s.nextSeq++;
           changed.add(userId);
         }
         if (changed.size === 0) return;
@@ -129,15 +146,14 @@ function createClockServer() {
     },
 
     onInstanceChange: async (kind, instance, host) => {
-      const s = stateFor(host);
+      const s = need();
       if (kind === 'removed') s.pusher.forget(instance.id);
       else if (kind === 'added') await pushSnapshots(host, s.pusher, [instance]);
     },
 
     routes(r, host) {
-      const s = stateFor(host);
       const pushFor = async (userId: string): Promise<void> => {
-        await pushSnapshots(host, s.pusher, (await host.instances()).filter((i) => i.ownerId === userId));
+        await pushSnapshots(host, need().pusher, (await host.instances()).filter((i) => i.ownerId === userId));
       };
 
       r.get('/timers', { level: 'view' }, (req) => listTimers(host.store.db, req.user.id, host.now()).map(toWire));

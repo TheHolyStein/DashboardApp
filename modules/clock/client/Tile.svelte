@@ -5,16 +5,16 @@
   import { getContext, type Component } from 'svelte';
   import { THEME_CONTEXT_KEY, type ClockFaceProps, type ThemeSeam, type TileProps } from '@dash/contract';
   import type { Settings, Snapshot } from '../manifest.js';
-  import { formatDate, formatRemaining, formatTime, userZone } from './format.js';
+  import { formatDate, formatRemaining, formatTime } from './format.js';
   import { useNow } from './useNow.svelte.js';
 
-  let { data, settings, size, mode, t }: TileProps<Snapshot, Settings> = $props();
+  let { data, settings, size, mode, t, locale, timeZone: userTimeZone }: TileProps<Snapshot, Settings> = $props();
 
   /** The shell's theme seam (absent in module tests and when no theme is active). */
   const theme = getContext<ThemeSeam | undefined>(THEME_CONTEXT_KEY);
 
   const MAX_TIMERS = 2;
-  const timeZone = $derived(settings.timeZone || userZone());
+  const timeZone = $derived(settings.timeZone || userTimeZone);
 
   // Seconds resolution only when the face shows seconds or a countdown is running.
   const timersRunning = $derived((data?.timers.length ?? 0) > 0);
@@ -67,8 +67,8 @@
   });
 
   // Formatted values are data (`<span data-value>` / `<time data-value>` in the markup), not translatable text.
-  const timeText = $derived(formatTime(now, { timeZone, hour12: settings.hour12, seconds: settings.showSeconds }));
-  const dateText = $derived(formatDate(now, timeZone));
+  const timeText = $derived(formatTime(now, { locale, timeZone, hour12: settings.hour12, seconds: settings.showSeconds }));
+  const dateText = $derived(formatDate(now, { locale, timeZone }));
 
   /** "in 25 min", "in 2 h", "in 3 days", "now". Minutes round up so the last minute never reads "now". */
   const countdown = $derived.by(() => {
@@ -98,7 +98,7 @@
     {:else}
       <div class="fallback" class:pending={faceState === 'loading'}>
         <time datetime={now.toISOString()} data-value>{timeText}</time>
-        {#if settings.label}<span class="label">{settings.label}</span>{/if}
+        {#if settings.label}<span class="label" data-user>{settings.label}</span>{/if}
       </div>
     {/if}
   </div>
@@ -107,14 +107,14 @@
     <div class="extras">
       {#if settings.showDate}<p class="date" data-value>{dateText}</p>{/if}
       {#if settings.showNextEvent && data?.nextEvent}
-        <p class="event"><span class="title">{data.nextEvent.title}</span> <span class="when">{countdown}</span></p>
+        <p class="event"><span class="title" data-user>{data.nextEvent.title}</span> <span class="when">{countdown}</span></p>
       {/if}
       {#if shownTimers.length > 0}
         <ul class="timers">
           {#each shownTimers as timer (timer.id)}
             <li>
               <span class="timer-label">
-                {#if timer.label}{timer.label}{:else}{t('m.clock.timer', 'Timer')}{/if}
+                {#if timer.label}<span data-user>{timer.label}</span>{:else}{t('m.clock.timer', 'Timer')}{/if}
               </span>
               <span class="remaining" data-value>{formatRemaining(Date.parse(timer.endsAt) - now.getTime())}</span>
             </li>
