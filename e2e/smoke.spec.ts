@@ -1,4 +1,4 @@
-import { ADMIN, MEMBER, expect, expectNoProblems, signIn, signOut, test } from './fixtures';
+import { ADMIN, MEMBER, addClock, clockTile, expect, expectNoProblems, signIn, signOut, test } from './fixtures';
 
 const rootVar = (name: string): string => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -27,11 +27,14 @@ test('default theme and day/night switch', async ({ page, problems }) => {
   await expectNoProblems(problems);
 });
 
-test('catalog shows no modules installed', async ({ page, problems }) => {
+test('catalog lists the Clock module with its name and description', async ({ page, problems }) => {
   await signIn(page, ADMIN);
   await page.getByRole('button', { name: 'Edit page' }).click();
   await page.getByRole('button', { name: 'Add module' }).click();
-  await expect(page.getByText('No modules installed')).toBeVisible();
+  const catalog = page.getByRole('dialog', { name: 'Add a module' });
+  await expect(catalog.getByText('Clock', { exact: true })).toBeVisible();
+  await expect(catalog.getByText('Time in any zone, countdown timers and the next calendar event.')).toBeVisible();
+  await expect(page.getByText('No modules installed')).toHaveCount(0);
   await expectNoProblems(problems);
 });
 
@@ -42,7 +45,7 @@ test('add a page and switch', async ({ page, problems }) => {
   const todayUrl = page.url();
 
   await page.getByRole('button', { name: `Account menu for ${ADMIN.name}` }).click();
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Pages' }).click();
   await page.getByLabel('New page').fill('Garage');
   await page.getByRole('button', { name: 'Add page' }).click();
@@ -68,7 +71,7 @@ test('member sees no admin sections and gets no admin data', async ({ page, prob
   });
   await signIn(page, MEMBER);
   await page.getByRole('button', { name: `Account menu for ${MEMBER.name}` }).click();
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
   await expect(nav.getByRole('button', { name: 'Account' })).toBeVisible();
   for (const admin of ['Users', 'Permissions', 'Modules']) {
@@ -91,7 +94,7 @@ test('security headers and CSP hold', async ({ page, problems }) => {
   await signIn(page, ADMIN);
   await page.getByRole('button', { name: 'Edit page' }).click();
   await page.getByRole('button', { name: 'Add module' }).click();
-  await expect(page.getByText('No modules installed')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Add a module' })).toBeVisible();
   await expectNoProblems(problems);
 });
 
@@ -136,7 +139,7 @@ test('background layer shows behind a transparent shell', async ({ page, problem
   await signIn(page, ADMIN);
   // Pick the first non-default background of the Default theme for this page through Appearance.
   await page.getByRole('button', { name: `Account menu for ${ADMIN.name}` }).click();
-  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Appearance' }).click();
   await page.getByLabel('Background of this page').selectOption({ label: 'Gradient' });
   await page.keyboard.press('Escape');
@@ -148,10 +151,89 @@ test('background layer shows behind a transparent shell', async ({ page, problem
   await expectNoProblems(problems);
 });
 
-test.skip('grid: drag and resize a tile in edit mode', () => {
-  // Needs a dashboard module to place a tile; none exist yet. Re-check when the first module lands.
+test('grid: drag and resize a tile in edit mode', async ({ page, problems }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await signIn(page, ADMIN);
+  await addClock(page);
+  const item = page.locator('.grid-stack-item[data-item-id]').filter({ has: page.locator('section[data-module-id="clock"]') }).last();
+  const grid = (): Promise<{ x: number; y: number; w: number; h: number }> =>
+    item.evaluate((el) => ({
+      x: Number(el.getAttribute('gs-x') ?? 0),
+      y: Number(el.getAttribute('gs-y') ?? 0),
+      w: Number(el.getAttribute('gs-w') ?? 0),
+      h: Number(el.getAttribute('gs-h') ?? 0),
+    }));
+  const id = await item.getAttribute('data-item-id');
+  const start = await grid();
+
+  // Drag right by about two columns. The press is offset from the tile corner and the move is made in many small
+  // steps: gridstack starts a drag only after the pointer has moved a few pixels.
+  const box = (await item.boundingBox())!;
+  const col = (await page.locator('.grid-stack').boundingBox())!.width / 12;
+  const fromX = box.x + 100;
+  const fromY = box.y + 100;
+  await page.mouse.move(fromX, fromY);
+  await page.mouse.down();
+  for (let i = 1; i <= 30; i++) await page.mouse.move(fromX + (i * 2.5 * col) / 30, fromY);
+  await page.mouse.up();
+  await expect.poll(async () => (await grid()).x).toBeGreaterThan(start.x);
+
+  // Resize from the corner handle (shown on hover) by about two columns.
+  const after = (await item.boundingBox())!;
+  await item.hover();
+  const hb = (await item.locator('.ui-resizable-se').boundingBox())!;
+  const handleX = hb.x + hb.width / 2;
+  const handleY = hb.y + hb.height / 2;
+  await page.mouse.move(handleX, handleY);
+  await page.mouse.down();
+  for (let i = 1; i <= 30; i++) await page.mouse.move(handleX + (i * 1.5 * col) / 30, handleY);
+  await page.mouse.up();
+  await expect.poll(async () => (await grid()).w).toBeGreaterThan(start.w);
+  expect((await item.boundingBox())!.width).toBeGreaterThan(after.width);
+
+  // The layout is saved: it survives a reload.
+  const saved = await grid();
+  // Saving is debounced (500 ms): wait until the server has the new size before reloading.
+  await expect
+    .poll(async () => {
+      const pages = (await (await page.request.get('/api/pages')).json()) as Array<{ instances: Array<{ id: string; layout: { w: number } }> }>;
+      return pages.flatMap((p) => p.instances).find((i) => i.id === id)?.layout.w;
+    })
+    .toBe(saved.w);
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Today' })).toBeVisible();
+  const again = page.locator(`.grid-stack-item[data-item-id="${id ?? ''}"]`);
+  await expect.poll(() => again.evaluate((el) => Number(el.getAttribute('gs-w')))).toBe(saved.w);
+  await expectNoProblems(problems);
 });
 
-test.skip('detail pane: dialog focus trap and Escape', () => {
-  // Needs a module with a detail view; none exist yet. Re-check when the first module lands.
+test('detail pane: dialog focus trap and Escape', async ({ page, problems }) => {
+  await signIn(page, ADMIN);
+  if ((await page.locator('section.tile[data-module-id="clock"]').count()) === 0) {
+    await addClock(page);
+    await page.getByRole('button', { name: 'Done' }).click();
+  }
+  const opener = clockTile(page).getByRole('button', { name: 'Clock' });
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  const pane = page.getByRole('dialog', { name: 'Clock' });
+  await expect(pane).toBeVisible();
+
+  // Tab around many times, forwards and backwards: focus is on a control of the dialog or, at the wrap point of a
+  // native modal dialog, on the document body (the browser's own chrome); never on the page behind it.
+  const insideOrBody = (): Promise<boolean> =>
+    pane.evaluate((el) => el.contains(document.activeElement) || document.activeElement === document.body);
+  for (let i = 0; i < 25; i++) {
+    await page.keyboard.press('Tab');
+    expect(await insideOrBody()).toBe(true);
+  }
+  for (let i = 0; i < 25; i++) {
+    await page.keyboard.press('Shift+Tab');
+    expect(await insideOrBody()).toBe(true);
+  }
+
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await expectNoProblems(problems);
 });

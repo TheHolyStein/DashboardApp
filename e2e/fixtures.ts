@@ -71,3 +71,18 @@ export async function signOut(page: Page, userName: string): Promise<void> {
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
+
+/** The first Clock tile on the page (earlier tests may have placed more). */
+export const clockTile = (page: Page) => page.locator('section.tile[data-module-id="clock"]').first();
+
+/** Edit mode on, Clock added from the catalog, edit mode left on. */
+export async function addClock(page: Page): Promise<void> {
+  const tiles = page.locator('section.tile[data-module-id="clock"]');
+  const before = await tiles.count();
+  await page.getByRole('button', { name: 'Edit page' }).click();
+  await page.getByRole('button', { name: 'Add module' }).click();
+  await page.getByRole('button', { name: /^Clock/ }).click();
+  await page.keyboard.press('Escape'); // closes the catalog
+  await expect(tiles).toHaveCount(before + 1);
+  await expect(clockTile(page)).toBeVisible();
+}
