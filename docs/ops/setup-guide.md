@@ -252,6 +252,12 @@ Exit code 0 means no FAIL. Exit code 1 means at least one FAIL. Add `--json` for
 - Something wrong: `troubleshooting.md`.
 - Copy `/etc/dashboard/secret.key` to a safe place off the box (a password manager or a USB stick). Without it, stored passwords and keys of modules cannot be recovered.
 
+## What to expect from the Clock module
+
+- Timers are checked every 5 seconds, so a finished timer can notify up to 5 seconds late; this is normal.
+- Time and dates follow the saved language and time zone of the signed-in person (Settings, Account), not the phone's.
+- A module that an administrator turned off before the last restart is set up when it is turned on again (Settings, Modules). If that fails the screen shows "Module setup failed" with the reason, and the module stays off until the problem is fixed and the service is restarted.
+
 ## Things this guide could not verify
 
 These need the real device and were not checked when this was written:

@@ -126,3 +126,41 @@ Three additive completions made before any module beyond Clock exists. `CONTRACT
 - Affected: tiles showing user content.
 - Migration: wrap such text in `<span data-user>`.
 
+
+## Open, not changed (found while finishing Clock and writing the end-to-end test)
+
+Nothing below changes `CONTRACT_VERSION`; each is recorded so the next module author is not surprised.
+
+### O1. Snapshots carry no order
+- Problem: a pushed snapshot built before the user's own change can reach the pane after that change's HTTP response, and replaces fresher local state (the e2e run hit it once: a new timer row vanished). A snapshot has `updatedAt` but modules cannot compare it with their own writes.
+- Not changed: a sequence number on snapshots needs a store change and a stream change. Clock now re-fetches `GET /timers` after every pushed snapshot and de-duplicates its own created row.
+- Rationale: one cheap GET per push is acceptable for a pane that is open; revisit if a module has expensive reads.
+
+### O2. Client modules have no logger
+- Problem: the server side has `host.log`; client code can only use `console`, which the e2e console check treats as an error for `console.error` and which nothing collects.
+- Not changed: Clock's formatter fallback (an unknown stored zone) uses one `console.warn` per failing locale/zone pair.
+- Rationale: only one warning exists so far; add a client log seam when a second module needs it.
+
+### O3. Pane focus is restored to the element focused at open time
+- Problem: `Pane` returns focus to `document.activeElement` from before it opened. Opening by clicking the tile frame (not focusable) therefore returns focus to the page body, not the tile.
+- Not changed (shell, outside the contract): the keyboard path (title button) returns focus correctly; the e2e test checks that path.
+- Rationale: the frame click is a pointer convenience; a fix would make `TileHost` pass the title button as the return target.
+
+### O4. Edit mode: the remove button covers the settings button
+- Problem: in edit mode the tile's remove button (top right) sits over the tile's settings button, so a pointer click on settings hits remove's hit area (Playwright reports the interception).
+- Not changed (shell layout, outside the contract): the e2e test opens settings with the keyboard.
+- Rationale: layout fix in `TileSlot`/`TileHeader`; no contract impact.
+
+### O5. Generated settings labels for plain booleans
+- Problem: a boolean without a `.meta({ label })` shows its raw key ("showSeconds") as the label.
+- Not changed: Clock keeps only `label` metas on `face` and `timeZone`.
+- Rationale: either label every field in the manifest or derive a label from the key; decide with the second module.
+
+### O6. `host.store` cannot say "any key with this prefix?"
+- Problem: Clock keeps a `hasNext` flag (guarded by a write counter against races) so an idle tick does not scan `next:` keys every 5 s.
+- Not changed: a cheap `exists(prefix)` or `count(prefix)` on the store would remove the flag and the counter.
+- Rationale: one user so far; the flag works and is tested.
+
+### O7. A module disabled at start and enabled later (fixed in the server, no contract change)
+- Problem: the loader runs `setup` only for enabled modules, so enabling a module through the admin screen left it without setup.
+- Done: `PUT /api/admin/modules/:id/enabled` runs `setup(host)` first; if it throws the module stays disabled, is marked failed, and the request answers 500 `internal` with "Module setup failed: <reason>".
