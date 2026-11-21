@@ -167,10 +167,12 @@ export function updateCalendar(
   return { ...cal, ...next };
 }
 
-/** Deletes a calendar with its shares. Owner only. */
+/** Deletes a calendar with its shares, events and change log. Owner only. */
 export function deleteCalendar(db: ModuleDb, calendarId: string, ownerId: UserId): void {
   requireOwned(db, calendarId, ownerId);
   db.transaction(() => {
+    db.run('DELETE FROM m_calendar_events WHERE calendar_id = ?', [calendarId]);
+    db.run('DELETE FROM m_calendar_changes WHERE calendar_id = ?', [calendarId]);
     db.run('DELETE FROM m_calendar_shares WHERE calendar_id = ?', [calendarId]);
     db.run('DELETE FROM m_calendar_calendars WHERE id = ?', [calendarId]);
   });
