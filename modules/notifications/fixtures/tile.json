@@ -1,1 +1,10 @@
-{ "value": 42, "label": "Example" }
+{
+  "epoch": "boot-1",
+  "rev": 4,
+  "unread": 3,
+  "latest": [
+    { "id": "n3", "level": "critical", "title": "NAS failed", "moduleId": "nas", "createdAt": "2026-11-12T07:50:00.000Z" },
+    { "id": "n2", "level": "warn", "title": "Storm tonight", "moduleId": "weather", "createdAt": "2026-11-12T07:40:00.000Z" },
+    { "id": "n1", "level": "info", "title": "Pasta", "moduleId": "clock", "createdAt": "2026-11-11T18:05:00.000Z" }
+  ]
+}

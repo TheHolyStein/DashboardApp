@@ -1,30 +1,106 @@
 <script lang="ts">
+  // Notifications tile: the unread count and the newest unread notifications. Needs-setup state: not applicable, the
+  // module has nothing to configure. Nothing in the tile is interactive: the shell's tile frame opens the detail pane.
+  import { untrack } from 'svelte';
   import type { TileProps } from '@dash/contract';
+  import type { Snapshot } from '../manifest.js';
+  import { levelClass, levelName } from './format.js';
 
-  // The shell opens the detail view when the tile frame (or its title) is activated; no open button needed.
-  // Set `detail: false` in client/index.ts for a tile without a detail view.
-  let { data, updatedAt, stale, level, isOwner, t, locale, timeZone }: TileProps<{ value: number; label: string }> = $props();
+  let { data: pushed, size, t, locale }: TileProps<Snapshot> = $props();
 
-  // Format with the user's saved locale and time zone from props; never the browser's or the server's default.
-  const number = $derived(new Intl.NumberFormat(locale));
-  const time = $derived(
-    updatedAt ? new Intl.DateTimeFormat(locale, { timeStyle: 'short', timeZone }).format(new Date(updatedAt)) : '',
-  );
+  // A snapshot older than the one on screen (a late or reordered push) is ignored; a new server epoch always wins.
+  let data = $state.raw<Snapshot | undefined>(untrack(() => pushed));
+  $effect.pre(() => {
+    const next = pushed;
+    untrack(() => {
+      if (next && (!data || next.epoch !== data.epoch || next.rev >= data.rev)) data = next;
+    });
+  });
+
+  // One row of height has room for the count only; the default size lists three, a tall tile five.
+  const rows = $derived(size.h >= 4 ? 5 : size.h >= 2 ? 3 : 0);
+  const shown = $derived((data?.latest ?? []).slice(0, rows));
+  const count = $derived.by(() => {
+    const n = data?.unread ?? 0;
+    try {
+      return new Intl.NumberFormat(locale).format(n);
+    } catch {
+      return String(n);
+    }
+  });
 </script>
 
-<section class:stale>
-  <h3>{t('m.notifications.title', 'Notifications')}</h3>
+<div class="notifications-tile">
   {#if data}
-    <p>{data.label}</p>
-    <!-- Formatted numbers, times and dates are data, not words: mark them with data-value instead of wrapping in t(). -->
-    <p><span data-value>{number.format(data.value)}</span></p>
-    {#if time}<p><span data-value>{time}</span></p>{/if}
+    <p class="summary">
+      {#if data.unread > 0}
+        <span class="count" data-value>{count}</span>
+        <span class="label">{t('m.notifications.unread', 'unread')}</span>
+      {:else}
+        <span class="label">{t('m.notifications.allRead', 'All caught up')}</span>
+      {/if}
+    </p>
+    {#if shown.length > 0}
+      <ul>
+        {#each shown as n (n.id)}
+          <li class={levelClass(n.level)}>
+            <span class="level">{levelName(n.level, t)}</span>
+            <span class="title" data-user>{n.title}</span>
+            <span class="module" data-value>{n.moduleId}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {:else}
-    <p>{t('m.notifications.loading', 'Loading')}</p>
+    <p class="label">{t('m.notifications.waiting', 'Waiting for notifications…')}</p>
   {/if}
-  <!-- The frame already shows a stale badge; do not re-implement it. Just do not invent progress from stale data. -->
-  <!-- User-written text (names, titles, notes) is exempt from t(): wrap it, e.g. <span data-user>{item.title}</span>. -->
-  {#if level === 'edit' && isOwner}
-    <button type="button" data-edit>{t('m.notifications.edit', 'Edit')}</button>
-  {/if}
-</section>
+</div>
+
+<style>
+  .notifications-tile {
+    container-type: inline-size;
+    display: grid;
+    gap: var(--db-gap, 8px);
+    align-content: start;
+    width: 100%;
+    height: 100%;
+    color: var(--db-fg);
+  }
+  p,
+  ul {
+    margin: 0;
+    padding: 0;
+  }
+  .count {
+    font-family: var(--db-font-display);
+    font-size: 2rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .label,
+  .level,
+  .module {
+    color: var(--db-muted);
+  }
+  ul {
+    display: grid;
+    gap: 0.25rem;
+    list-style: none;
+  }
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.5rem;
+    border-inline-start: 4px solid var(--db-accent);
+    padding-inline-start: 0.5rem;
+  }
+  li.warn {
+    border-inline-start-color: var(--db-warn);
+  }
+  li.critical {
+    border-inline-start-color: var(--db-crit);
+  }
+  .title {
+    font-weight: 600;
+  }
+</style>
