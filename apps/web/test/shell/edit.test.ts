@@ -295,6 +295,22 @@ describe('edit mode', () => {
     expect(document.querySelector('[data-instance-id="f1"]')).toBeTruthy();
   });
 
+  it('settings and remove are separate header controls in edit mode, settings first', async () => {
+    await open({ pgs: [page('p1', [clock])] });
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit page' }));
+    const remove = await screen.findByRole('button', { name: 'Remove Clock' });
+    const settings = await tileSettings('c1');
+    const header = settings.closest('header');
+    // Both live in the tile header (flow layout), not in an absolutely positioned overlay on top of it.
+    expect(remove.closest('header')).toBe(header);
+    expect(remove.closest('.remove')).toBeNull();
+    expect(settings.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Both are reachable by keyboard in that order.
+    settings.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(remove);
+  });
+
   it('toggles edit mode with the edit bar and Done', async () => {
     await open({ pgs: [page('p1', [clock])] });
     expect(pages.editing).toBe(false);

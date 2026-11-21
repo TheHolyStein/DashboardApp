@@ -2,7 +2,13 @@
   import { onMount, type Snippet } from 'svelte';
   import { useT } from './context.js';
 
-  let { title, onClose, children }: { title: string; onClose: () => void; children?: Snippet | undefined } = $props();
+  /** `returnFocus` names where focus goes on close (default: the element focused when the pane opened). */
+  let {
+    title,
+    onClose,
+    returnFocus,
+    children,
+  }: { title: string; onClose: () => void; returnFocus?: (() => HTMLElement | null) | undefined; children?: Snippet | undefined } = $props();
 
   const t = useT();
   const uid = $props.id();
@@ -32,7 +38,10 @@
     return () => {
       window.removeEventListener('resize', onResize);
       if (el.open) el.close();
-      if (previous?.isConnected) previous.focus();
+      const target = returnFocus?.();
+      if (target?.isConnected) target.focus();
+      else if (previous?.isConnected && previous !== document.body) previous.focus();
+      else if (returnFocus) document.querySelector<HTMLElement>('[data-focus-fallback]')?.focus();
     };
   });
 </script>

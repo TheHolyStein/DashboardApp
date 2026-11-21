@@ -57,6 +57,37 @@ describe('detail pane', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it('opened by a frame click, Escape returns focus to the tile title button, not the body', async () => {
+    await setup();
+    await userEvent.click(await screen.findByTestId('plain-area'));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    await screen.findByTestId('detail');
+    screen.getByRole('button', { name: 'Close' }).focus();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(dialog()).toBeNull());
+    const title = within(screen.getByTestId('slot-i1')).getByRole('button', { name: 'Good' });
+    expect(document.activeElement).toBe(title);
+  });
+
+  it('falls back to the page region when the tile title button is gone', async () => {
+    const region = document.createElement('div');
+    region.tabIndex = -1;
+    region.setAttribute('data-focus-fallback', '');
+    document.body.append(region);
+    try {
+      await setup();
+      await userEvent.click(await screen.findByTestId('plain-area'));
+      await screen.findByTestId('detail');
+      within(screen.getByTestId('slot-i1')).getByRole('button', { name: 'Good' }).remove();
+      screen.getByRole('button', { name: 'Close' }).focus();
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(dialog()).toBeNull());
+      expect(document.activeElement).toBe(region);
+    } finally {
+      region.remove();
+    }
+  });
+
   it('the detail receives the saved locale and time zone', async () => {
     await setup();
     signIn({

@@ -1,18 +1,28 @@
-import { ADMIN, addClock, clockTile, expect, expectNoProblems, signIn, test } from './fixtures';
+import type { Page } from '@playwright/test';
+import { ADMIN, addClock, expect, expectNoProblems, signIn, test } from './fixtures';
+
+/** The bell badge: its number, and whether it shows a capped value such as "9+". */
+async function unread(page: Page): Promise<{ n: number; capped: boolean }> {
+  const badge = page.getByTestId('unread-badge');
+  if ((await badge.count()) === 0) return { n: 0, capped: false };
+  const text = (await badge.textContent()) ?? '';
+  return { n: Number(/\d+/.exec(text)?.[0] ?? 0), capped: text.includes('+') };
+}
 
 test('clock: add tile, seconds, open pane, timer notifies, escape closes', async ({ page, problems }) => {
   // The timer job runs every 5 s, so a 3-second timer is announced within 5 + 3 s; allow 12 s.
   test.setTimeout(60_000);
   await signIn(page, ADMIN);
 
+  // This test owns its tile: it is found by the instance id from the create response and removed at the end.
+  const created = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/instances');
   await addClock(page);
-  const tile = clockTile(page);
+  const instanceId = ((await (await created).json()) as { id: string }).id;
+  const tile = page.locator(`section.tile[data-instance-id="${instanceId}"]`);
   await expect(tile.locator('.clock-tile time')).toBeVisible();
 
   // Settings: show seconds.
-  // In edit mode the tile's remove button covers the settings button (pointer clicks are intercepted): use the keyboard.
-  await tile.getByRole('button', { name: 'Tile settings' }).focus();
-  await page.keyboard.press('Enter');
+  await tile.getByRole('button', { name: 'Tile settings' }).click();
   const settings = page.getByRole('dialog', { name: /^Settings: Clock/ });
   await settings.getByLabel(/seconds/i).check();
   await settings.getByRole('button', { name: 'Save' }).click();
@@ -32,27 +42,39 @@ test('clock: add tile, seconds, open pane, timer notifies, escape closes', async
   await expect(pane.getByRole('heading', { name: 'Timers' })).toBeVisible();
 
   // A 3-second timer notifies its owner: the bell badge goes up by one.
-  const badge = page.getByTestId('unread-badge');
-  const before = (await badge.count()) === 0 ? 0 : Number(await badge.textContent());
-  await pane.getByLabel('Label').fill('E2E tea');
+  const label = `E2E tea ${Math.random().toString(36).slice(2, 8)}`;
+  const before = await unread(page);
+  await pane.getByLabel('Label').fill(label);
   await pane.getByLabel('Minutes').fill('0');
   await pane.getByLabel('Seconds').fill('3');
   await pane.getByRole('button', { name: 'Start timer' }).click();
-  await expect(pane.getByRole('button', { name: 'Cancel E2E tea' })).toBeVisible();
-  await expect(badge).toHaveText(String(before + 1), { timeout: 12_000 });
+  await expect(pane.getByRole('button', { name: `Cancel ${label}` })).toBeVisible();
+  if (before.capped) {
+    await expect(page.getByTestId('unread-badge')).toHaveText(/\+$/, { timeout: 12_000 }); // already "9+": cannot count further
+  } else {
+    await expect.poll(async () => (await unread(page)).n, { timeout: 12_000 }).toBe(before.n + 1);
+  }
 
-  // Escape closes the pane.
+  // Escape closes the pane; opened by a frame click, focus returns to the tile's title button.
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
-
-  // Opened from the keyboard (the tile's title button), Escape returns focus to that button.
   const opener = tile.getByRole('button', { name: 'Clock' });
+  await expect(opener).toBeFocused();
+
+  // Opened from the keyboard (the title button), Escape returns focus to that button too.
   await opener.focus();
   await page.keyboard.press('Enter');
   await expect(pane).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
   await expect(opener).toBeFocused();
+
+  // Clean up: remove the tile (its timer goes with it).
+  await page.getByRole('button', { name: 'Edit page' }).click();
+  await tile.getByRole('button', { name: 'Remove Clock' }).click();
+  await page.getByRole('dialog', { name: 'Remove tile?' }).getByRole('button', { name: 'Remove' }).click();
+  await expect(tile).toHaveCount(0);
+  await page.getByRole('button', { name: 'Done' }).click();
 
   await expectNoProblems(problems);
 });

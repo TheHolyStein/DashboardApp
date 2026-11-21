@@ -51,7 +51,7 @@
 </script>
 
 {#if found && loading}
-  <Pane {title} onClose={() => detail.close()}>
+  <Pane {title} onClose={() => detail.close()} returnFocus={() => detail.returnTo}>
     {#await loading}
       <div class="skeleton" role="status" aria-label={t('tile.loading', 'Loading')}></div>
     {:then loaded}

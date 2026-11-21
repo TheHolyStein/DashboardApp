@@ -218,6 +218,7 @@ test('detail pane: dialog focus trap and Escape', async ({ page, problems }) => 
   await page.keyboard.press('Enter');
   const pane = page.getByRole('dialog', { name: 'Clock' });
   await expect(pane).toBeVisible();
+  expect(await pane.evaluate((el: HTMLDialogElement) => el.open && el.matches(':modal'))).toBe(true);
 
   // Tab around many times, forwards and backwards: focus is on a control of the dialog or, at the wrap point of a
   // native modal dialog, on the document body (the browser's own chrome); never on the page behind it.

@@ -14,6 +14,7 @@
     now,
     onSettings,
     onOpen,
+    actions,
     children,
   }: {
     title: string;
@@ -24,6 +25,8 @@
     onSettings?: (() => void) | undefined;
     /** Makes the title a button that opens the detail view. */
     onOpen?: (() => void) | undefined;
+    /** Extra header controls after the settings button. */
+    actions?: Snippet | undefined;
     children?: Snippet | undefined;
   } = $props();
 
@@ -33,7 +36,7 @@
 </script>
 
 <article class="surface" class:is-stale={stale}>
-  <TileHeader {title} {icon} {onSettings} {onOpen} />
+  <TileHeader {title} {icon} {onSettings} {onOpen} {actions} />
   <div class="body">{@render children?.()}</div>
   {#if updatedAt || stale}
     <footer class="foot">

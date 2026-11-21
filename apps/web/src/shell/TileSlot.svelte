@@ -41,6 +41,12 @@
   }
 </script>
 
+{#snippet removeButton()}
+  <span class="remove-btn">
+    <Button variant="danger" data-edit aria-label={t('tile.remove', 'Remove {name}', { name: name ?? instance.moduleId })} onclick={() => (confirming = true)}>✕</Button>
+  </span>
+{/snippet}
+
 <!-- Tile frame; the host loads the module and renders its tile inside the @dash/ui Tile surface. -->
 <section
   class="tile"
@@ -52,15 +58,14 @@
   aria-label={name ?? t('tile.unavailable', 'Module unavailable')}
 >
   {#if manifest}
-    <TileHost {instance} {page} {modules} />
+    <!-- In the header, after the settings button, so the two controls never overlap. -->
+    <TileHost {instance} {page} {modules} actions={canRemove ? removeButton : undefined} />
   {:else}
     <p class="name">{t('tile.unavailable', 'Module unavailable')}</p>
     <p class="hint">{instance.moduleId}</p>
   {/if}
-  {#if canRemove}
-    <div class="remove">
-      <Button variant="danger" data-edit aria-label={t('tile.remove', 'Remove {name}', { name: name ?? instance.moduleId })} onclick={() => (confirming = true)}>✕</Button>
-    </div>
+  {#if canRemove && !manifest}
+    <div class="remove">{@render removeButton()}</div>
   {/if}
   {#if removeError}<p class="hint" role="alert">{t('tile.removeFailed', 'Could not remove the tile.')}</p>{/if}
 {#if confirming}
@@ -84,6 +89,8 @@
   .hosted { padding: 0; background: none; border: 0; border-radius: 0; overflow: visible; }
   .unavailable { color: var(--db-muted, #4a5260); border-style: dashed; }
   .remove { position: absolute; top: 4px; right: 4px; z-index: 2; }
+  .remove-btn { display: inline-flex; }
+  .remove-btn :global(.btn) { min-width: 2rem; min-height: 2rem; padding: 0.1rem 0.5rem; }
   .name { margin: 0; font-weight: 600; }
   .hint { margin: 0.25rem 0 0; font-size: 0.85em; }
 </style>

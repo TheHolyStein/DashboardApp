@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getContext, onMount, setContext, untrack } from 'svelte';
+  import { getContext, onMount, setContext, untrack, type Snippet } from 'svelte';
   import { ICONS_CONTEXT_KEY, T_CONTEXT_KEY, THEME_CONTEXT_KEY, type Mode, type ModuleClient, type ThemeSeam, type TileProps } from '@dash/contract';
   import { Button, Tile } from '@dash/ui';
   import { clientModules } from '../generated/modules.js';
@@ -17,7 +17,8 @@
     instance,
     page,
     modules = clientModules,
-  }: { instance: Instance; page: Page; modules?: HostRegistry } = $props();
+    actions,
+  }: { instance: Instance; page: Page; modules?: HostRegistry; actions?: Snippet | undefined } = $props();
 
   const theme = getContext<ThemeSeam | undefined>(THEME_CONTEXT_KEY);
   setContext(T_CONTEXT_KEY, t);
@@ -99,6 +100,9 @@
   // Not while arranging tiles (drag/resize), and not before the client has loaded or if it has no detail view.
   const openable = $derived(allowed && hasDetail && !pages.editing);
   const open = (): void => detail.open(instance.id);
+  let frame: HTMLElement | undefined;
+  // A frame click has no focused opener; focus returns to the title button, the keyboard entry point.
+  const openFromFrame = (): void => detail.open(instance.id, {}, frame?.querySelector<HTMLElement>('button[aria-haspopup="dialog"]') ?? null);
   let pressAt: { x: number; y: number } | null = null;
   function onFramePointerDown(e: PointerEvent): void {
     pressAt = { x: e.clientX, y: e.clientY };
@@ -110,7 +114,7 @@
     // Selecting text in the tile is not a click on the tile.
     if (window.getSelection()?.toString()) return;
     if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_PX) return;
-    open();
+    openFromFrame();
   }
 
   onMount(() => ticker.subscribe());
@@ -118,8 +122,8 @@
 
 <!-- Mouse and touch: the whole frame opens the detail pane. Keyboard and assistive technology: the title button (Tile `onOpen`). -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="frame" class:openable data-openable={openable ? 'true' : undefined} onpointerdown={onFramePointerDown} onclick={onFrameClick}>
-<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined} onOpen={openable ? open : undefined}>
+<div class="frame" bind:this={frame} class:openable data-openable={openable ? 'true' : undefined} onpointerdown={onFramePointerDown} onclick={onFrameClick}>
+<Tile {title} icon={entry?.manifest.icon} stale={base.stale} updatedAt={base.updatedAt} now={ticker.now} onSettings={canConfigure ? () => openSettings(instance.id) : undefined} onOpen={openable ? open : undefined} {actions}>
   {#if !allowed || !loading}
     <p class="unavailable" data-unavailable="true">{t('tile.unavailable', 'Module unavailable')}</p>
   {:else}

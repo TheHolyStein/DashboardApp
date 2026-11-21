@@ -141,15 +141,13 @@ Nothing below changes `CONTRACT_VERSION`; each is recorded so the next module au
 - Not changed: Clock's formatter fallback (an unknown stored zone) uses one `console.warn` per failing locale/zone pair.
 - Rationale: only one warning exists so far; add a client log seam when a second module needs it.
 
-### O3. Pane focus is restored to the element focused at open time
-- Problem: `Pane` returns focus to `document.activeElement` from before it opened. Opening by clicking the tile frame (not focusable) therefore returns focus to the page body, not the tile.
-- Not changed (shell, outside the contract): the keyboard path (title button) returns focus correctly; the e2e test checks that path.
-- Rationale: the frame click is a pointer convenience; a fix would make `TileHost` pass the title button as the return target.
+### O3. Edit mode: the remove button covers the settings button (fixed)
+- Problem: in edit mode the tile's remove button (top right) sat over the tile's settings button, so a pointer click on settings hit remove's hit area (Playwright reported the interception).
+- Fixed in the shell, no contract change: the remove button is now rendered in the tile header after the settings button (`Tile`/`TileHeader` take an `actions` snippet that `TileSlot` fills), both with a 32 px minimum hit area; keyboard order is settings, then remove. `e2e/clock.spec.ts` clicks the settings button with the pointer again.
 
-### O4. Edit mode: the remove button covers the settings button
-- Problem: in edit mode the tile's remove button (top right) sits over the tile's settings button, so a pointer click on settings hits remove's hit area (Playwright reports the interception).
-- Not changed (shell layout, outside the contract): the e2e test opens settings with the keyboard.
-- Rationale: layout fix in `TileSlot`/`TileHeader`; no contract impact.
+### O4. Pane focus after a frame-click open (fixed)
+- Problem: `Pane` returned focus to `document.activeElement` from before it opened. Opening by clicking the tile frame (not focusable) therefore returned focus to the page body, not the tile.
+- Fixed in the shell, no contract change: a frame click records the tile's title button (the keyboard entry point) as the return target (`detail.open(id, params, focusAfter)`, read by `Pane`'s `returnFocus`); if that button is gone, focus goes to the page region (`[data-focus-fallback]`). `e2e/clock.spec.ts` asserts focus returns to the tile after Escape for both the frame click and the keyboard path.
 
 ### O5. Generated settings labels for plain booleans
 - Problem: a boolean without a `.meta({ label })` shows its raw key ("showSeconds") as the label.

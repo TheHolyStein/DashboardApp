@@ -26,6 +26,9 @@ export function parseDetail(search: string): DetailState | null {
 export function createDetail(deps: DetailDeps) {
   let state = $state<DetailState | null>(parseDetail(deps.location.search));
   let pushed = false; // the open pane has a history entry created in this session
+  // Where focus goes when the pane closes, when it was opened from a frame click (no focused opener). Kept after
+  // close so the pane can read it while unmounting; replaced by the next open.
+  let returnTo: HTMLElement | null = null;
 
   function urlWith(next: DetailState | null): string {
     const q = new URLSearchParams(deps.location.search);
@@ -49,8 +52,13 @@ export function createDetail(deps: DetailDeps) {
     get current(): DetailState | null {
       return state;
     },
-    /** Open (or switch to) the pane for an instance. Opening from closed pushes a history entry. */
-    open(id: string, params: Record<string, string> = {}): void {
+    /** Element to focus when the pane closes, if the opener recorded one. */
+    get returnTo(): HTMLElement | null {
+      return returnTo;
+    },
+    /** Open (or switch to) the pane for an instance. Opening from closed pushes a history entry. `focusAfter` is where focus returns on close. */
+    open(id: string, params: Record<string, string> = {}, focusAfter: HTMLElement | null = null): void {
+      returnTo = focusAfter;
       const next = { id, params };
       if (state) deps.history.replaceState(null, '', urlWith(next));
       else {
