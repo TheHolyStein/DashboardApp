@@ -33,6 +33,8 @@ export interface WireItem {
   doneBy: string | null;
   version: number;
   url: string | null;
+  /** Who made it, for items created by a request (for example `calendar:<uid>`); null for items made by hand. */
+  sourceKey: string | null;
   repeatEvery: number | null;
   repeatUnit: RepeatUnit | null;
   rotation: string[];

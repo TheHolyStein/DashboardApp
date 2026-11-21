@@ -1,30 +1,165 @@
 <script lang="ts">
+  // Todo tile: counts per bucket, the next items with checkboxes and a quick-add field. Needs-setup state: not
+  // applicable, the module needs no configuration. Without `data` the tile shows a loading line.
+  import { untrack } from 'svelte';
   import type { TileProps } from '@dash/contract';
+  import { Button, Empty } from '@dash/ui';
+  import type { Bucket, ItemList, Settings, Snapshot } from '../manifest.js';
+  import { bucketer } from '../server/buckets.js';
+  import ItemRow from './ItemRow.svelte';
+  import { useMinute } from './minute.svelte.js';
+  import { conflictItem, GROUPS, newer, parseQuickAdd, type Group, type Row } from './model.js';
 
-  // The shell opens the detail view when the tile frame (or its title) is activated; no open button needed.
-  // Set `detail: false` in client/index.ts for a tile without a detail view.
-  let { data, updatedAt, stale, level, isOwner, t, locale, timeZone }: TileProps<{ value: number; label: string }> = $props();
+  let { data: pushed, settings, level, isOwner, size, api, t, locale, timeZone }: TileProps<Snapshot, Settings> = $props();
 
-  // Format with the user's saved locale and time zone from props; never the browser's or the server's default.
-  const number = $derived(new Intl.NumberFormat(locale));
-  const time = $derived(
-    updatedAt ? new Intl.DateTimeFormat(locale, { timeStyle: 'short', timeZone }).format(new Date(updatedAt)) : '',
-  );
+  // A snapshot older than the one on screen (a late or reordered push) is ignored; a new server epoch always wins.
+  let data = $state.raw<Snapshot | undefined>(untrack(() => pushed));
+  $effect.pre(() => {
+    const next = pushed;
+    untrack(() => {
+      if (next) data = newer(data ?? null, next);
+    });
+  });
+
+  const canEdit = $derived(level === 'edit' && isOwner && (data?.canEdit ?? true));
+  const ticker = useMinute();
+
+  let text = $state('');
+  let adding = $state(false);
+  let error = $state('');
+  let hint = $state('');
+  /** Ids ticked here whose snapshot has not arrived yet: they show as done at once. */
+  let pending = $state<Record<string, boolean>>({});
+
+  const bucketOf = $derived(bucketer(ticker.now, timeZone));
+  const groupOf = (item: Snapshot['items'][number]): Group => (item.done ? 'done' : (bucketOf(item) as Bucket));
+  const rowOf = (item: Snapshot['items'][number]): Row => ({
+    id: item.id,
+    title: item.title,
+    icon: item.icon,
+    qty: null,
+    note: null,
+    due: item.due,
+    done: pending[item.id] ?? item.done,
+    version: item.version,
+    assigneeName: item.assigneeName,
+    fromCalendar: false,
+    overdue: !item.done && groupOf(item) === 'overdue',
+  });
+
+  const groups = $derived.by(() => {
+    const items = data?.items ?? [];
+    return GROUPS.map((g) => ({ group: g, rows: items.filter((i) => groupOf(i) === g).map(rowOf) })).filter((g) => g.rows.length > 0);
+  });
+  const flat = $derived((data?.items ?? []).map(rowOf));
+  const roomy = $derived(size.h >= 3);
+  const headerLabel = (g: Group): string => {
+    switch (g) {
+      case 'overdue': return t('m.todo.bucket.overdue', 'Overdue');
+      case 'today': return t('m.todo.bucket.today', 'Today');
+      case 'week': return t('m.todo.bucket.week', 'This week');
+      case 'month': return t('m.todo.bucket.month', 'This month');
+      case 'later': return t('m.todo.bucket.later', 'Later');
+      case 'none': return t('m.todo.bucket.none', 'No date');
+      default: return t('m.todo.bucket.done', 'Done');
+    }
+  };
+  const countOf = (g: Group, shown: number): number => (g === 'done' ? shown : (data?.counts[g] ?? shown));
+  /** New items go into the first list the tile shows. */
+  const targetList = $derived(settings.lists[0] ?? 'week');
+
+  // Reload the whole thing: the answer is the full list, the snapshot push follows with the new state.
+  async function toggle(row: Row): Promise<void> {
+    if (pending[row.id] !== undefined) return;
+    error = '';
+    hint = '';
+    pending[row.id] = !row.done;
+    try {
+      await api.post<ItemList>(`/items/${row.id}/done`, { version: row.version, done: !row.done, timeZone });
+    } catch (err) {
+      delete pending[row.id];
+      if (conflictItem(err)) hint = t('m.todo.conflict', 'Someone else changed this item. It has been refreshed.');
+      else error = t('m.todo.saveFailed', 'Could not save your change.');
+    }
+  }
+
+  // Snapshot arrived: the optimistic marks are no longer needed.
+  $effect(() => {
+    void data;
+    untrack(() => {
+      for (const id of Object.keys(pending)) delete pending[id];
+    });
+  });
+
+  async function quickAdd(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (adding) return;
+    const { title, handle } = parseQuickAdd(text);
+    if (title === '') return;
+    adding = true;
+    error = '';
+    try {
+      await api.post<ItemList>('/items', { list: targetList, title, ...(handle ? { assigneeHandle: handle } : {}), timeZone });
+      text = '';
+    } catch {
+      error = t('m.todo.addFailed', 'Could not add the item. Check the @name.');
+    } finally {
+      adding = false;
+    }
+  }
 </script>
 
-<section class:stale>
-  <h3>{t('m.todo.title', 'Todo')}</h3>
-  {#if data}
-    <p>{data.label}</p>
-    <!-- Formatted numbers, times and dates are data, not words: mark them with data-value instead of wrapping in t(). -->
-    <p><span data-value>{number.format(data.value)}</span></p>
-    {#if time}<p><span data-value>{time}</span></p>{/if}
+<div class="todo-tile">
+  {#if !data}
+    <p class="muted">{t('m.todo.loading', 'Loading…')}</p>
+  {:else if flat.length === 0}
+    <Empty text={t('m.todo.empty', 'Nothing to do.')} />
+  {:else if !roomy}
+    <ul class="rows">
+      {#each flat.slice(0, 3) as row (row.id)}
+        <ItemRow {row} {t} {locale} {timeZone} {canEdit} ontoggle={toggle} />
+      {/each}
+    </ul>
   {:else}
-    <p>{t('m.todo.loading', 'Loading')}</p>
+    {#each groups as g (g.group)}
+      <section aria-labelledby={`todo-g-${g.group}`}>
+        <h4 id={`todo-g-${g.group}`} class="head">
+          {headerLabel(g.group)} <span class="count" data-value>{countOf(g.group, g.rows.length)}</span>
+        </h4>
+        <ul class="rows">
+          {#each g.rows as row (row.id)}
+            <ItemRow {row} {t} {locale} {timeZone} {canEdit} ontoggle={toggle} />
+          {/each}
+        </ul>
+      </section>
+    {/each}
   {/if}
-  <!-- The frame already shows a stale badge; do not re-implement it. Just do not invent progress from stale data. -->
-  <!-- User-written text (names, titles, notes) is exempt from t(): wrap it, e.g. <span data-user>{item.title}</span>. -->
-  {#if level === 'edit' && isOwner}
-    <button type="button" data-edit>{t('m.todo.edit', 'Edit')}</button>
+
+  {#if hint}<p class="hint" role="status">{hint}</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
+
+  {#if canEdit && roomy}
+    <form class="quick" onsubmit={quickAdd}>
+      <input
+        data-edit
+        bind:value={text}
+        maxlength="220"
+        placeholder={t('m.todo.quickAdd', 'Add item, @name to assign')}
+        aria-label={t('m.todo.quickAddLabel', 'Add an item')}
+      />
+      <Button data-edit type="submit" busy={adding}>{t('m.todo.add', 'Add')}</Button>
+    </form>
   {/if}
-</section>
+</div>
+
+<style>
+  .todo-tile { container-type: inline-size; display: grid; align-content: start; gap: 0.5rem; width: 100%; height: 100%; overflow: auto; color: var(--db-fg); }
+  .head { display: flex; align-items: baseline; gap: 0.5rem; margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--db-muted); }
+  .count { font-variant-numeric: tabular-nums; }
+  .rows { margin: 0; padding: 0; }
+  .muted, .hint { margin: 0; color: var(--db-muted); }
+  .error { margin: 0; border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
+  .quick { display: flex; gap: 0.5rem; margin-top: auto; }
+  .quick input { flex: 1; min-width: 0; font: inherit; padding: 0.4rem 0.6rem; color: var(--db-fg); background: var(--db-surface); border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); }
+  .quick input:focus-visible { outline: 2px solid var(--db-focus, #1d4ed8); outline-offset: 2px; }
+</style>

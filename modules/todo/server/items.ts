@@ -155,6 +155,7 @@ export function toWire(item: Item, bucket: WireItem['bucket']): WireItem {
     doneBy: item.doneBy,
     version: item.version,
     url: item.url,
+    sourceKey: item.sourceKey,
     repeatEvery: item.repeatEvery,
     repeatUnit: item.repeatUnit,
     rotation: item.rotation,

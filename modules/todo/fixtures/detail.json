@@ -1,0 +1,55 @@
+{
+  "epoch": "00000000-0000-7000-8000-000000000001",
+  "rev": 7,
+  "counts": {
+    "overdue": 1,
+    "today": 1,
+    "week": 2,
+    "month": 0,
+    "later": 0,
+    "none": 1
+  },
+  "items": [
+    {
+      "id": "i1",
+      "title": "Pay the invoice",
+      "icon": "note",
+      "list": "deadline",
+      "due": "2026-11-10T22:59:00.000Z",
+      "assigneeName": "Dana",
+      "done": false,
+      "version": 2
+    },
+    {
+      "id": "i2",
+      "title": "Call the plumber",
+      "icon": "📞",
+      "list": "week",
+      "due": "2026-11-18T15:00:00.000Z",
+      "assigneeName": null,
+      "done": false,
+      "version": 1
+    },
+    {
+      "id": "i3",
+      "title": "Bins out",
+      "icon": null,
+      "list": "chores",
+      "due": "2026-11-20T22:59:00.000Z",
+      "assigneeName": "Eli",
+      "done": false,
+      "version": 4
+    },
+    {
+      "id": "i4",
+      "title": "Oat milk",
+      "icon": null,
+      "list": "shopping",
+      "due": null,
+      "assigneeName": null,
+      "done": false,
+      "version": 1
+    }
+  ],
+  "canEdit": true
+}
