@@ -33,18 +33,18 @@ export interface NewItem {
   list: TodoListId;
   title: string;
   ownerId: string;
-  icon?: string | null;
-  note?: string | null;
-  qty?: string | null;
+  icon?: string | null | undefined;
+  note?: string | null | undefined;
+  qty?: string | null | undefined;
   /** An ISO instant, or a `YYYY-MM-DD` day (meaning 23:59 local that day). */
-  due?: string | null;
-  assigneeId?: string | null;
-  visibility?: 'private' | 'shared';
-  url?: string | null;
-  repeatEvery?: number | null;
-  repeatUnit?: RepeatUnit | null;
-  rotation?: string[];
-  sourceKey?: string | null;
+  due?: string | null | undefined;
+  assigneeId?: string | null | undefined;
+  visibility?: 'private' | 'shared' | undefined;
+  url?: string | null | undefined;
+  repeatEvery?: number | null | undefined;
+  repeatUnit?: RepeatUnit | null | undefined;
+  rotation?: string[] | undefined;
+  sourceKey?: string | null | undefined;
 }
 
 export type Patch = Partial<Omit<NewItem, 'ownerId' | 'sourceKey'>>;
@@ -169,7 +169,7 @@ export function wireOf(item: Item, now: Date, timeZone: string): WireItem {
   return toWire(item, bucketer(now, timeZone)(item));
 }
 
-function checkTitle(title: string): string {
+export function checkTitle(title: string): string {
   const t = title.trim();
   if (t === '') throw invalid('title is required');
   if (t.length > MAX_TITLE) throw invalid(`title is longer than ${MAX_TITLE} characters`);
@@ -177,7 +177,7 @@ function checkTitle(title: string): string {
 }
 
 /** An icon key (`todo`, `shopping-cart`) or a single emoji. */
-function checkIcon(icon: string | null | undefined): string | null {
+export function checkIcon(icon: string | null | undefined): string | null {
   if (icon === null || icon === undefined || icon === '') return null;
   if (ICON_KEY.test(icon)) return icon;
   const graphemes = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(icon)];
@@ -193,7 +193,7 @@ function checkText(v: string | null | undefined, max: number, what: string): str
   return t;
 }
 
-function checkUrl(v: string | null | undefined): string | null {
+export function checkUrl(v: string | null | undefined): string | null {
   const t = checkText(v, MAX_URL, 'url');
   if (t === null) return null;
   try {
@@ -216,7 +216,7 @@ export function normaliseDue(input: string | null | undefined, timeZone: string)
 }
 
 /** Week and month items without an explicit due date are due at the end of the current week or month. */
-function impliedDue(list: TodoListId, due: string | null, now: Date, timeZone: string): string | null {
+export function impliedDue(list: TodoListId, due: string | null, now: Date, timeZone: string): string | null {
   if (due !== null) return due;
   if (list === 'week') return endOfIsoWeek(now, timeZone).toISOString();
   if (list === 'month') return endOfMonth(now, timeZone).toISOString();
