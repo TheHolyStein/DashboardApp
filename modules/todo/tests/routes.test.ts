@@ -68,6 +68,22 @@ describe('items routes', () => {
     expect((await post({ list: 'week', title: 'x'.repeat(201) })).status).toBe(422);
     expect((await post({ list: 'week', title: 'x', assigneeId: 'ghost' })).status).toBe(422);
     expect((await post({ list: 'week', title: 'x', assigneeHandle: 'ghost' })).status).toBe(422);
+    expect((await post({ list: 'chores', title: 'x', repeatEvery: 1, repeatUnit: 'week', rotation: ['u1', 'ghost'] })).status).toBe(422);
+    expect((await post({ list: 'chores', title: 'x', repeatEvery: 1, repeatUnit: 'week', rotation: ['u1', 'u2'] })).status).toBe(200);
+    const item = await add(router, 'u1', { list: 'chores', title: 'y' });
+    expect((await router.call('PATCH', `/items/${item.id}`, { ...as('u1'), body: { version: item.version, repeatEvery: 1, repeatUnit: 'day', rotation: ['ghost'] } })).status).toBe(422);
+  });
+
+  it('undoing a done repeating chore through the API removes the spawned occurrence and reports it', async () => {
+    const { host, router } = await setup();
+    const chore = await add(router, 'u1', { list: 'chores', title: 'Bins', due: '2026-11-16T18:00:00Z', repeatEvery: 1, repeatUnit: 'week', rotation: ['u1', 'u2'] });
+    const done = await router.call('POST', `/items/${chore.id}/done`, { ...as('u1'), body: { version: chore.version, done: true } });
+    const afterDone = (done.body as ItemList).items;
+    expect(afterDone.filter((i) => !i.done)).toHaveLength(1);
+    const doneRow = afterDone.find((i) => i.id === chore.id)!;
+    const undo = await router.call('POST', `/items/${chore.id}/done`, { ...as('u1'), body: { version: doneRow.version, done: false } });
+    expect((undo.body as ItemList).items.map((i) => [i.id, i.done])).toEqual([[chore.id, false]]);
+    expect(host.published.filter((p) => p.name === 'todo.changed').at(-1)).toEqual({ name: 'todo.changed', payload: { itemId: afterDone.find((i) => i.id !== chore.id)!.id, kind: 'deleted' } });
   });
 
   it('assigneeHandle resolves through the user list', async () => {
@@ -76,12 +92,15 @@ describe('items routes', () => {
     expect(item.assigneeId).toBe('u2');
   });
 
-  it('time zone shapes the implicit due date and buckets', async () => {
-    const { router } = await setup();
-    const item = await add(router, 'u1', { list: 'week', title: 'Plan', timeZone: 'Europe/Berlin' });
+  it('the saved time zone of the user shapes the implicit due date and buckets; the client sends none', async () => {
+    const { host, router } = await setup();
+    const zoned = (timeZone: string) => USERS.map((u) => (u.id === 'u1' ? { ...u, timeZone } : u));
+    host.setUsers(zoned('Europe/Berlin'));
+    const item = await add(router, 'u1', { list: 'week', title: 'Plan' });
     expect(item.due).toBe('2026-11-22T22:59:00.000Z');
     expect(item.bucket).toBe('week');
-    const late = await router.call('GET', '/items', { ...as('u1', 'view'), query: { timeZone: 'Pacific/Auckland' } });
+    host.setUsers(zoned('Pacific/Auckland'));
+    const late = await router.call('GET', '/items', as('u1', 'view'));
     // Sunday 22:59 UTC is already Monday in Auckland: the same instant falls into the next week there.
     expect((late.body as ItemList).items[0]!.bucket).toBe('month');
   });
@@ -127,7 +146,8 @@ describe('PUT /order', () => {
     const res = await router.call('PUT', '/order', { ...as('u1'), body: { list: 'shopping', ids: [b.id, a.id] } });
     expect(res.status).toBe(200);
     expect((res.body as ItemList).order).toEqual({ shopping: [b.id, a.id] });
-    expect((res.body as ItemList).rev).toBe(before.rev); // an order change is not a data change
+    expect((res.body as ItemList).rev).toBeGreaterThan(before.rev); // the answer is newer than what the client holds
+    expect((await listOf(router, 'u1')).rev).toBe((res.body as ItemList).rev);
     expect((await listOf(router, 'u2')).order).toEqual({});
     expect(await host.store.get('order:u1:shopping')).toEqual([b.id, a.id]);
     expect((await router.call('PUT', '/order', { ...as('u1', 'view'), body: { list: 'shopping', ids: [] } })).status).toBe(403);
@@ -239,6 +259,6 @@ describe('GET /users', () => {
   it('lists the household for the assignee picker', async () => {
     const { router } = await setup();
     const res = await router.call('GET', '/users', as('u1', 'view'));
-    expect(res.body).toEqual(USERS);
+    expect(res.body).toEqual(USERS.map(({ id, name, handle }) => ({ id, name, handle })));
   });
 });

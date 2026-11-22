@@ -110,8 +110,11 @@ export function endOfLocalDay(date: string, timeZone: string): Date | null {
   return new Date(makeZone(timeZone).toUtc(y, mo, d, END_H, END_MI));
 }
 
-/** `due` + `every` units, keeping the local wall-clock time; a month step clamps to the length of the target month. */
-export function addInterval(due: Date, every: number, unit: RepeatUnit, timeZone: string): Date {
+/**
+ * `due` + `every` units, keeping the local wall-clock time; a month step clamps to the length of the target month but
+ * aims for `anchorDay` (default: the day of `due`), so 31 Jan -> 28 Feb -> 31 Mar.
+ */
+export function addInterval(due: Date, every: number, unit: RepeatUnit, timeZone: string, anchorDay?: number): Date {
   const z = makeZone(timeZone);
   const p = z.parts(due.getTime());
   if (unit === 'month') {
@@ -119,7 +122,7 @@ export function addInterval(due: Date, every: number, unit: RepeatUnit, timeZone
     const y = Math.floor(total / 12);
     const m = (total % 12) + 1;
     const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    return new Date(z.toUtc(y, m, Math.min(p.d, last), p.h, p.mi));
+    return new Date(z.toUtc(y, m, Math.min(anchorDay ?? p.d, last), p.h, p.mi));
   }
   const days = unit === 'week' ? every * 7 : every;
   const t = new Date(Date.UTC(p.y, p.m - 1, p.d + days));

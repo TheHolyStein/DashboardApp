@@ -8,7 +8,7 @@
   import { bucketer } from '../server/buckets.js';
   import ItemRow from './ItemRow.svelte';
   import { useMinute } from './minute.svelte.js';
-  import { conflictItem, GROUPS, newer, parseQuickAdd, type Group, type Row } from './model.js';
+  import { conflictItem, GROUPS, isGone, newer, parseQuickAdd, type Group, type Row } from './model.js';
 
   let { data: pushed, settings, level, isOwner, size, api, t, locale, timeZone }: TileProps<Snapshot, Settings> = $props();
 
@@ -28,10 +28,16 @@
   let adding = $state(false);
   let error = $state('');
   let hint = $state('');
-  /** Ids ticked here whose snapshot has not arrived yet: they show as done at once. */
-  let pending = $state<Record<string, boolean>>({});
+  /**
+   * Ticks made here whose snapshot has not arrived yet: the row shows the new state at once. A mark goes when the item
+   * in a pushed snapshot has changed (another version than the one ticked) or is gone, or, once the request has
+   * settled, with the next snapshot. An unrelated snapshot that arrives while the request runs leaves it alone.
+   */
+  let pending = $state<Record<string, { done: boolean; version: number; settled: boolean }>>({});
 
-  const bucketOf = $derived(bucketer(ticker.now, timeZone));
+  // Groups and counts are in the zone the snapshot was computed in (the owner's), not the viewer's.
+  const zone = $derived(data?.timeZone ?? timeZone);
+  const bucketOf = $derived(bucketer(ticker.now, zone));
   const groupOf = (item: Snapshot['items'][number]): Group => (item.done ? 'done' : (bucketOf(item) as Bucket));
   const rowOf = (item: Snapshot['items'][number]): Row => ({
     id: item.id,
@@ -40,7 +46,7 @@
     qty: null,
     note: null,
     due: item.due,
-    done: pending[item.id] ?? item.done,
+    done: pending[item.id]?.done ?? item.done,
     version: item.version,
     assigneeName: item.assigneeName,
     fromCalendar: false,
@@ -70,25 +76,36 @@
 
   // Reload the whole thing: the answer is the full list, the snapshot push follows with the new state.
   async function toggle(row: Row): Promise<void> {
-    if (pending[row.id] !== undefined) return;
+    if (pending[row.id]?.settled === false) return;
     error = '';
     hint = '';
-    pending[row.id] = !row.done;
+    const mark = { done: !row.done, version: row.version, settled: false };
+    pending[row.id] = mark;
     try {
-      await api.post<ItemList>(`/items/${row.id}/done`, { version: row.version, done: !row.done, timeZone });
+      await api.post<ItemList>(`/items/${row.id}/done`, { version: row.version, done: !row.done });
+      const held = pending[row.id]; // the $state proxy of `mark`
+      if (held) held.settled = true;
+      prune(false);
     } catch (err) {
       delete pending[row.id];
-      if (conflictItem(err)) hint = t('m.todo.conflict', 'Someone else changed this item. It has been refreshed.');
+      if (conflictItem(err) || isGone(err)) hint = t('m.todo.conflict', 'Someone else changed this item. It has been refreshed.');
       else error = t('m.todo.saveFailed', 'Could not save your change.');
     }
   }
 
-  // Snapshot arrived: the optimistic marks are no longer needed.
+  /** Drops the marks whose item changed or vanished in the snapshot on screen; `all` also drops the settled ones. */
+  function prune(all: boolean): void {
+    const items = new Map((data?.items ?? []).map((i) => [i.id, i]));
+    for (const [id, mark] of Object.entries(pending)) {
+      const item = items.get(id);
+      if (!item || item.version !== mark.version || (all && mark.settled)) delete pending[id];
+    }
+  }
+
+  // A pushed snapshot: marks of items that changed (or whose request has settled) are no longer needed.
   $effect(() => {
     void data;
-    untrack(() => {
-      for (const id of Object.keys(pending)) delete pending[id];
-    });
+    untrack(() => prune(true));
   });
 
   async function quickAdd(event: SubmitEvent): Promise<void> {
@@ -99,7 +116,7 @@
     adding = true;
     error = '';
     try {
-      await api.post<ItemList>('/items', { list: targetList, title, ...(handle ? { assigneeHandle: handle } : {}), timeZone });
+      await api.post<ItemList>('/items', { list: targetList, title, ...(handle ? { assigneeHandle: handle } : {}) });
       text = '';
     } catch {
       error = t('m.todo.addFailed', 'Could not add the item. Check the @name.');

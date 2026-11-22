@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EventPayload } from '@dash/contract';
 import server from '../server/index.js';
-import { add, as, listOf, setup } from './helpers.js';
+import { add, as, listOf, setup, USERS } from './helpers.js';
 
 type Create = EventPayload<'todo.create.request'>;
 const create = (over: Partial<Create> = {}): Create => ({
@@ -40,6 +40,48 @@ describe('todo.create.request', () => {
     expect(host.published.at(-1)).toEqual({ name: 'todo.changed', payload: { itemId: before.id, kind: 'updated' } });
   });
 
+  it('an update with no due keeps the existing due on a week list, however much time passes', async () => {
+    const { host, router } = await setup();
+    const req = create({ list: 'week', due: null, ownerId: 'u1', title: 'Weekly thing' });
+    await handle('todo.create.request')(req, host as never);
+    const before = (await listOf(router, 'u1')).items[0]!;
+    host.advance(10 * 86_400_000);
+    await handle('todo.create.request')({ ...req, title: 'Weekly thing 2' }, host as never);
+    const after = (await listOf(router, 'u1')).items[0]!;
+    expect(after.due).toBe(before.due);
+    expect(after.version).toBe(before.version + 1); // only the title changed
+    await handle('todo.create.request')({ ...req, title: 'Weekly thing 2' }, host as never);
+    expect((await listOf(router, 'u1')).items[0]!.version).toBe(after.version); // identical re-emit: nothing
+  });
+
+  it('a re-emitted request does not overwrite a manual edit, but a changed request field applies', async () => {
+    const { host, router } = await setup();
+    await handle('todo.create.request')(create({ ownerId: 'u1' }), host as never);
+    const item = (await listOf(router, 'u1')).items[0]!;
+    await router.call('PATCH', `/items/${item.id}`, { ...as('u1'), body: { version: item.version, title: 'My own title', assigneeId: 'u2' } });
+    await handle('todo.create.request')(create({ ownerId: 'u1' }), host as never);
+    expect((await listOf(router, 'u1')).items[0]).toMatchObject({ title: 'My own title', assigneeId: 'u2' });
+    await handle('todo.create.request')(create({ ownerId: 'u1', due: '2026-11-25T10:00:00Z' }), host as never);
+    expect((await listOf(router, 'u1')).items[0]).toMatchObject({ title: 'My own title', assigneeId: 'u2', due: '2026-11-25T10:00:00.000Z' });
+  });
+
+  it('owners: ownerId makes an item of that user, no owner a shared household item; keys are per owner', async () => {
+    const { host, router } = await setup();
+    await handle('todo.create.request')(create({ sourceKey: 'k', ownerId: 'u1' }), host as never);
+    await handle('todo.create.request')(create({ sourceKey: 'k', ownerId: 'u2' }), host as never);
+    await handle('todo.create.request')(create({ sourceKey: 'k', ownerId: null }), host as never);
+    await handle('todo.create.request')(create({ sourceKey: 'k2', ownerId: 'u1', list: 'shopping' }), host as never);
+    await handle('todo.create.request')(create({ sourceKey: 'k3', ownerId: 'u1', visibility: 'shared' }), host as never);
+    const rows = host.store.db.all<{ source_key: string; owner_id: string; visibility: string }>('SELECT source_key, owner_id, visibility FROM m_todo_items');
+    expect(rows.filter((r) => r.source_key === 'k').map((r) => r.owner_id).sort()).toEqual(['system', 'u1', 'u2']);
+    const vis = (k: string, o: string) => rows.find((r) => r.source_key === k && r.owner_id === o)?.visibility;
+    expect(vis('k', 'u1')).toBe('private'); // deadline default
+    expect(vis('k', 'system')).toBe('shared');
+    expect(vis('k2', 'u1')).toBe('shared'); // shopping default
+    expect(vis('k3', 'u1')).toBe('shared');
+    expect((await listOf(router, 'u3')).items.map((i) => i.ownerId).sort()).toEqual(['system', 'u1', 'u1']); // the shared ones
+  });
+
   it('request after user completed it does not recreate', async () => {
     const { host, router } = await setup();
     await handle('todo.create.request')(create(), host as never);
@@ -64,7 +106,7 @@ describe('todo.create.request', () => {
 
   it('an assigned request creates a private item for the assignee only', async () => {
     const { host, router } = await setup();
-    await handle('todo.create.request')(create({ list: 'week', sourceKey: 'k', assigneeId: 'u2', due: null }), host as never);
+    await handle('todo.create.request')(create({ list: 'week', sourceKey: 'k', assigneeId: 'u2', ownerId: 'u2', due: null }), host as never);
     expect((await listOf(router, 'u2')).items).toHaveLength(1);
     expect((await listOf(router, 'u3')).items).toHaveLength(0);
     expect((await listOf(router, 'u2')).items[0]!.due).toBe('2026-11-22T23:59:00.000Z'); // implicit end of week (UTC)
@@ -89,14 +131,27 @@ describe('todo.remove.request', () => {
 });
 
 describe('item.readLater', () => {
-  it('creates a shared deadline item with the url once', async () => {
+  it('creates a private deadline item with the url, once, for the publishing user', async () => {
     const { host, router } = await setup();
-    const payload = { title: 'Interesting article', url: 'https://example.org/a', source: 'rss' };
+    const payload = { title: 'Interesting article', url: 'https://example.org/a', source: 'rss', userId: 'u2' };
     await handle('item.readLater')(payload, host as never);
     await handle('item.readLater')(payload, host as never);
-    const { items } = await listOf(router, 'u3');
+    const { items } = await listOf(router, 'u2');
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ list: 'deadline', title: 'Interesting article', url: 'https://example.org/a', due: null });
+    expect(items[0]).toMatchObject({ list: 'deadline', title: 'Interesting article', url: 'https://example.org/a', due: null, visibility: 'private', ownerId: 'u2' });
+    expect((await listOf(router, 'u1')).items).toHaveLength(0);
+  });
+
+  it('without a user it makes one private item per admin', async () => {
+    const { host, router } = await setup();
+    host.setUsers(USERS.map((u) => ({ ...u, role: u.id === 'u3' ? ('member' as const) : ('admin' as const) })));
+    const payload = { title: 'Article', url: 'https://example.org/c', source: 'rss', userId: null };
+    await handle('item.readLater')(payload, host as never);
+    await handle('item.readLater')(payload, host as never);
+    expect((await listOf(router, 'u1')).items).toHaveLength(1);
+    expect((await listOf(router, 'u2')).items).toHaveLength(1);
+    expect((await listOf(router, 'u3')).items).toHaveLength(0);
+    expect(host.store.db.all('SELECT id FROM m_todo_items')).toHaveLength(2);
   });
 
   it('ignores a url that is not http(s)', async () => {

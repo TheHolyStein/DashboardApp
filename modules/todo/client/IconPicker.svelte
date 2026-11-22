@@ -29,7 +29,7 @@
       <span aria-hidden="true">∅</span>
     </button>
     {#each KEYS as key (key)}
-      <button type="button" data-edit class="cell" aria-pressed={value === key} aria-label={key} onclick={() => onchange(key)}>
+      <button type="button" data-edit class="cell" aria-pressed={value === key} aria-label={t(`m.todo.icon.${key}`, key)} onclick={() => onchange(key)}>
         <Icon name={key} size={18} />
       </button>
     {/each}

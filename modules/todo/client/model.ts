@@ -35,6 +35,11 @@ export function conflictItem(err: unknown): WireItem | null {
   return item ?? null;
 }
 
+/** True for the 404 the server answers when an item was deleted (or hidden) by somebody else. */
+export function isGone(err: unknown): boolean {
+  return err instanceof DashError && err.code === 'not_found';
+}
+
 /** Replaces one item inside a held list (the stamp stays: the item is newer, the list as a whole is not). */
 export function withItem(list: ItemList, item: WireItem): ItemList {
   return { ...list, items: list.items.map((i) => (i.id === item.id ? item : i)) };
@@ -59,7 +64,7 @@ export function rowOf(item: WireItem, names: Map<string, string>): Row {
     done: item.done,
     version: item.version,
     assigneeName: item.assigneeId === null ? null : (names.get(item.assigneeId) ?? null),
-    fromCalendar: item.sourceKey?.startsWith('calendar:') ?? false,
+    fromCalendar: item.fromCalendar,
     overdue: item.bucket === 'overdue' && !item.done,
   };
 }

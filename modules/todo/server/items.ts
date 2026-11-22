@@ -1,7 +1,7 @@
 import { DashError, type ModuleDb } from '@dash/contract';
 import { newId } from '@dash/module-kit';
 import { LISTS, type RepeatUnit, type TodoListId, type WireItem } from '../manifest.js';
-import { addInterval, bucketer, endOfIsoWeek, endOfLocalDay, endOfMonth } from './buckets.js';
+import { addInterval, bucketer, endOfIsoWeek, endOfLocalDay, endOfMonth, makeZone } from './buckets.js';
 
 export interface Item {
   id: string;
@@ -25,6 +25,12 @@ export interface Item {
   rotation: string[];
   rotationIdx: number;
   deleted: boolean;
+  /** The next occurrence this (done) chore created, if any. */
+  spawnedId: string | null;
+  /** Day of month a monthly chore keeps (31 Jan -> 28 Feb -> 31 Mar). */
+  anchorDay: number | null;
+  /** The last request payload that touched this item (JSON), for items made by a request. */
+  requestJson: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +51,7 @@ export interface NewItem {
   repeatUnit?: RepeatUnit | null | undefined;
   rotation?: string[] | undefined;
   sourceKey?: string | null | undefined;
+  requestJson?: string | null | undefined;
 }
 
 export type Patch = Partial<Omit<NewItem, 'ownerId' | 'sourceKey'>>;
@@ -71,12 +78,15 @@ interface Row {
   rotation: string;
   rotation_idx: number;
   deleted: number;
+  spawned_id: string | null;
+  anchor_day: number | null;
+  request_json: string | null;
   created_at: string;
-  modified_at: string;
+  updated_at: string;
 }
 
 const COLUMNS = `id, list, title, icon, note, qty, due, owner_id, assignee_id, visibility, done, done_at, done_by, version,
-  source_key, url, repeat_every, repeat_unit, rotation, rotation_idx, deleted, created_at, modified_at`;
+  source_key, url, repeat_every, repeat_unit, rotation, rotation_idx, deleted, spawned_id, anchor_day, request_json, created_at, updated_at`;
 
 export const MAX_TITLE = 200;
 const MAX_NOTE = 2000;
@@ -118,8 +128,11 @@ function rowToItem(r: Row): Item {
     rotation: parseRotation(r.rotation),
     rotationIdx: r.rotation_idx,
     deleted: r.deleted === 1,
+    spawnedId: r.spawned_id,
+    anchorDay: r.anchor_day,
+    requestJson: r.request_json,
     createdAt: r.created_at,
-    updatedAt: r.modified_at,
+    updatedAt: r.updated_at,
   };
 }
 
@@ -155,7 +168,7 @@ export function toWire(item: Item, bucket: WireItem['bucket']): WireItem {
     doneBy: item.doneBy,
     version: item.version,
     url: item.url,
-    sourceKey: item.sourceKey,
+    fromCalendar: item.sourceKey?.startsWith('calendar:') ?? false,
     repeatEvery: item.repeatEvery,
     repeatUnit: item.repeatUnit,
     rotation: item.rotation,
@@ -248,7 +261,8 @@ function insert(db: ModuleDb, item: Item): void {
     [
       item.id, item.list, item.title, item.icon, item.note, item.qty, item.due, item.ownerId, item.assigneeId, item.visibility,
       item.done ? 1 : 0, item.doneAt, item.doneBy, item.version, item.sourceKey, item.url, item.repeatEvery, item.repeatUnit,
-      JSON.stringify(item.rotation), item.rotationIdx, item.deleted ? 1 : 0, item.createdAt, item.updatedAt,
+      JSON.stringify(item.rotation), item.rotationIdx, item.deleted ? 1 : 0, item.spawnedId, item.anchorDay, item.requestJson,
+      item.createdAt, item.updatedAt,
     ],
   );
 }
@@ -258,9 +272,21 @@ export function getItem(db: ModuleDb, id: string): Item | undefined {
   return row ? rowToItem(row) : undefined;
 }
 
-export function getBySourceKey(db: ModuleDb, sourceKey: string): Item | undefined {
-  const row = db.get<Row>(`SELECT ${COLUMNS} FROM m_todo_items WHERE source_key = ?`, [sourceKey]);
+export function getBySourceKey(db: ModuleDb, ownerId: string, sourceKey: string): Item | undefined {
+  const row = db.get<Row>(`SELECT ${COLUMNS} FROM m_todo_items WHERE owner_id = ? AND source_key = ?`, [ownerId, sourceKey]);
   return row ? rowToItem(row) : undefined;
+}
+
+/** Every item with that key, whoever owns it. */
+export function allBySourceKey(db: ModuleDb, sourceKey: string): Item[] {
+  return db.all<Row>(`SELECT ${COLUMNS} FROM m_todo_items WHERE source_key = ?`, [sourceKey]).map(rowToItem);
+}
+
+/** The day of month a monthly chore with this due date repeats on; null for any other repeat. */
+export function anchorOf(due: string | null, unit: RepeatUnit | null, timeZone: string): number | null {
+  if (unit !== 'month' || due === null) return null;
+  const ms = Date.parse(due);
+  return Number.isNaN(ms) ? null : makeZone(timeZone).parts(ms).d;
 }
 
 /** Items the user may see (not deleted), unordered. */
@@ -279,6 +305,7 @@ export function createItem(db: ModuleDb, input: NewItem, now: Date, timeZone: st
   const assigneeId = input.assigneeId ?? repeat.rotation[0] ?? null;
   const idx = assigneeId === null ? 0 : Math.max(0, repeat.rotation.indexOf(assigneeId));
   const stamp = now.toISOString();
+  const due = impliedDue(list, normaliseDue(input.due, timeZone), now, timeZone);
   const item: Item = {
     id: newId(now),
     list,
@@ -286,7 +313,7 @@ export function createItem(db: ModuleDb, input: NewItem, now: Date, timeZone: st
     icon: checkIcon(input.icon),
     note: checkText(input.note, MAX_NOTE, 'note'),
     qty: checkText(input.qty, MAX_QTY, 'quantity'),
-    due: impliedDue(list, normaliseDue(input.due, timeZone), now, timeZone),
+    due,
     ownerId: input.ownerId,
     assigneeId,
     visibility: input.visibility ?? defaultVisibility(list),
@@ -301,6 +328,9 @@ export function createItem(db: ModuleDb, input: NewItem, now: Date, timeZone: st
     rotation: repeat.rotation,
     rotationIdx: idx,
     deleted: false,
+    spawnedId: null,
+    anchorDay: anchorOf(due, repeat.unit, timeZone),
+    requestJson: input.requestJson ?? null,
     createdAt: stamp,
     updatedAt: stamp,
   };
@@ -347,6 +377,7 @@ export function updateItem(
       ? impliedDue(list, patch.due === undefined ? cur.due : normaliseDue(patch.due, timeZone), now, timeZone)
       : cur.due;
   const idx = assigneeId !== null && repeat.rotation.includes(assigneeId) ? repeat.rotation.indexOf(assigneeId) : cur.rotationIdx;
+  const reanchor = patch.due !== undefined || patch.list !== undefined || repeat.unit !== cur.repeatUnit;
   const next: Item = {
     ...cur,
     list,
@@ -362,16 +393,17 @@ export function updateItem(
     repeatUnit: repeat.unit,
     rotation: repeat.rotation,
     rotationIdx: idx,
+    anchorDay: reanchor ? anchorOf(due, repeat.unit, timeZone) : cur.anchorDay,
     version: cur.version + 1,
     updatedAt: now.toISOString(),
   };
   const ok = bumped(
     db,
     `UPDATE m_todo_items SET list = ?, title = ?, icon = ?, note = ?, qty = ?, due = ?, assignee_id = ?, visibility = ?, url = ?,
-      repeat_every = ?, repeat_unit = ?, rotation = ?, rotation_idx = ?, version = version + 1, modified_at = ?`,
+      repeat_every = ?, repeat_unit = ?, rotation = ?, rotation_idx = ?, anchor_day = ?, version = version + 1, updated_at = ?`,
     [
       next.list, next.title, next.icon, next.note, next.qty, next.due, next.assigneeId, next.visibility, next.url,
-      next.repeatEvery, next.repeatUnit, JSON.stringify(next.rotation), next.rotationIdx, next.updatedAt,
+      next.repeatEvery, next.repeatUnit, JSON.stringify(next.rotation), next.rotationIdx, next.anchorDay, next.updatedAt,
     ],
     id,
     version,
@@ -382,7 +414,9 @@ export function updateItem(
 
 /**
  * Marks an item done. A repeating chore also gets its next occurrence (`due + every x unit`, assigned to the next
- * person in the rotation); the pair is written in one transaction. Done on an item that is already done changes nothing.
+ * person in the rotation); the pair is written in one transaction and the done row remembers the spawned id. When it
+ * already points to a live open occurrence (the user undid the chore and the occurrence had been touched), nothing is
+ * spawned again. Done on an item that is already done changes nothing.
  */
 export function completeItem(
   db: ModuleDb,
@@ -399,21 +433,23 @@ export function completeItem(
     const stamp = now.toISOString();
     const ok = bumped(
       db,
-      'UPDATE m_todo_items SET done = 1, done_at = ?, done_by = ?, version = version + 1, modified_at = ?',
+      'UPDATE m_todo_items SET done = 1, done_at = ?, done_by = ?, version = version + 1, updated_at = ?',
       [stamp, userId, stamp],
       id,
       version,
     );
     if (!ok) throw conflict(accessible(db, id, userId), now, timeZone);
-    const item = accessible(db, id, userId);
     let next: Item | null = null;
-    if (cur.repeatEvery !== null && cur.repeatUnit !== null) {
+    const held = cur.spawnedId === null ? undefined : getItem(db, cur.spawnedId);
+    const alive = held !== undefined && !held.deleted && !held.done;
+    if (cur.repeatEvery !== null && cur.repeatUnit !== null && !alive) {
       const base = cur.due === null ? now : new Date(cur.due);
       const idx = cur.rotation.length > 0 ? (cur.rotationIdx + 1) % cur.rotation.length : 0;
+      const anchor = cur.anchorDay ?? anchorOf(base.toISOString(), cur.repeatUnit, timeZone);
       next = {
         ...cur,
         id: newId(now),
-        due: addInterval(base, cur.repeatEvery, cur.repeatUnit, timeZone).toISOString(),
+        due: addInterval(base, cur.repeatEvery, cur.repeatUnit, timeZone, anchor ?? undefined).toISOString(),
         assigneeId: cur.rotation[idx] ?? cur.assigneeId,
         rotationIdx: idx,
         done: false,
@@ -421,29 +457,54 @@ export function completeItem(
         doneBy: null,
         version: 1,
         sourceKey: null,
+        requestJson: null,
+        spawnedId: null,
+        anchorDay: anchor,
         createdAt: stamp,
         updatedAt: stamp,
       };
       insert(db, next);
+      db.run('UPDATE m_todo_items SET spawned_id = ? WHERE id = ?', [next.id, id]);
     }
-    return { item, next };
+    return { item: accessible(db, id, userId), next };
   });
 }
 
-/** Done -> open again (the next occurrence of a repeating chore, if it was already created, stays). */
-export function reopenItem(db: ModuleDb, id: string, userId: string, version: number, now: Date, timeZone = 'UTC'): Item {
+/**
+ * Done -> open again. The next occurrence the completion created is removed with it, in the same transaction, when it
+ * is still open and untouched (version 1); one somebody edited stays, and completing again will not spawn another.
+ * The done row's own `rotation_idx` was never changed, so the rotation is where it was before the completion.
+ */
+export function reopenItem(
+  db: ModuleDb,
+  id: string,
+  userId: string,
+  version: number,
+  now: Date,
+  timeZone = 'UTC',
+): { item: Item; removedId: string | null } {
   const cur = accessible(db, id, userId);
   if (cur.version !== version) throw conflict(cur, now, timeZone);
-  if (!cur.done) return cur;
-  const ok = bumped(
-    db,
-    'UPDATE m_todo_items SET done = 0, done_at = NULL, done_by = NULL, version = version + 1, modified_at = ?',
-    [now.toISOString()],
-    id,
-    version,
-  );
-  if (!ok) throw conflict(accessible(db, id, userId), now, timeZone);
-  return accessible(db, id, userId);
+  if (!cur.done) return { item: cur, removedId: null };
+  return db.transaction(() => {
+    const ok = bumped(
+      db,
+      'UPDATE m_todo_items SET done = 0, done_at = NULL, done_by = NULL, version = version + 1, updated_at = ?',
+      [now.toISOString()],
+      id,
+      version,
+    );
+    if (!ok) throw conflict(accessible(db, id, userId), now, timeZone);
+    let removedId: string | null = null;
+    if (cur.spawnedId !== null) {
+      const gone = db.run('DELETE FROM m_todo_items WHERE id = ? AND done = 0 AND deleted = 0 AND version = 1', [cur.spawnedId]).changes === 1;
+      if (gone) {
+        removedId = cur.spawnedId;
+        db.run('UPDATE m_todo_items SET spawned_id = NULL WHERE id = ?', [id]);
+      }
+    }
+    return { item: accessible(db, id, userId), removedId };
+  });
 }
 
 /** An item that came from a request keeps a tombstone so the request cannot bring it back; any other is removed. */
@@ -453,7 +514,7 @@ export function deleteItem(db: ModuleDb, id: string, userId: string, version: nu
   const ok =
     cur.sourceKey === null
       ? db.run('DELETE FROM m_todo_items WHERE id = ? AND version = ?', [id, version]).changes === 1
-      : bumped(db, 'UPDATE m_todo_items SET deleted = 1, version = version + 1, modified_at = ?', [now.toISOString()], id, version);
+      : bumped(db, 'UPDATE m_todo_items SET deleted = 1, version = version + 1, updated_at = ?', [now.toISOString()], id, version);
   if (!ok) throw conflict(accessible(db, id, userId), now, timeZone);
   return cur;
 }
@@ -464,7 +525,7 @@ export function clearDone(db: ModuleDb, userId: string, list: TodoListId, now: D
     const gone = visibleItems(db, userId).filter((i) => i.list === list && i.done);
     for (const i of gone) {
       if (i.sourceKey === null) db.run('DELETE FROM m_todo_items WHERE id = ?', [i.id]);
-      else db.run('UPDATE m_todo_items SET deleted = 1, version = version + 1, modified_at = ? WHERE id = ?', [now.toISOString(), i.id]);
+      else db.run('UPDATE m_todo_items SET deleted = 1, version = version + 1, updated_at = ? WHERE id = ?', [now.toISOString(), i.id]);
     }
     return gone.map((i) => i.id);
   });

@@ -16,7 +16,10 @@ export const settings = z.object({
 });
 export type Settings = z.infer<typeof settings>;
 
-/** An item as the API sends it (no source key, no tombstone marker). `bucket` is computed in the caller's time zone. */
+/**
+ * An item as the API sends it: no source key, no tombstone marker, no internal bookkeeping. `fromCalendar` is the one
+ * thing the client needs from the source key (the chip). `bucket` is computed in the caller's time zone.
+ */
 export interface WireItem {
   id: string;
   list: TodoListId;
@@ -33,8 +36,8 @@ export interface WireItem {
   doneBy: string | null;
   version: number;
   url: string | null;
-  /** Who made it, for items created by a request (for example `calendar:<uid>`); null for items made by hand. */
-  sourceKey: string | null;
+  /** Made by a calendar request (source key `calendar:<uid>`). */
+  fromCalendar: boolean;
   repeatEvery: number | null;
   repeatUnit: RepeatUnit | null;
   rotation: string[];
@@ -72,6 +75,8 @@ export type SnapshotItem = {
 export type Snapshot = {
   epoch: string;
   rev: number;
+  /** The zone `counts` were computed in (the instance owner's); the tile groups items in the same zone. */
+  timeZone: string;
   counts: Record<Bucket, number>;
   items: SnapshotItem[];
   canEdit: boolean;

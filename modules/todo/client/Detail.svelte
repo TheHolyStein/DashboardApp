@@ -8,7 +8,7 @@
   import type { ItemList, Settings, Snapshot, TodoListId, WireItem } from '../manifest.js';
   import ItemEditor from './ItemEditor.svelte';
   import ItemRow from './ItemRow.svelte';
-  import { conflictItem, inOrder, LIST_ORDER, newer, rowOf, withItem, type EditorValues, type Row } from './model.js';
+  import { conflictItem, inOrder, isGone, LIST_ORDER, newer, rowOf, withItem, type EditorValues, type Row } from './model.js';
   import StoreMode from './StoreMode.svelte';
 
   let { data, settings, level, isOwner, api, t, locale, timeZone, params }: DetailProps<Snapshot, Settings> = $props();
@@ -26,6 +26,8 @@
   let error = $state('');
   let hint = $state('');
   let editing = $state<{ item: WireItem | null } | null>(null);
+  /** The current server version of the item being edited, after a 409 (the editor stays open with the user's input). */
+  let conflict = $state.raw<WireItem | null>(null);
   let saving = $state(false);
   let storeMode = $state(false);
   let busyIds = $state<Record<string, boolean>>({});
@@ -54,35 +56,47 @@
   const failure = (err: unknown): string =>
     err instanceof DashError && err.code === 'invalid' && err.message ? err.message : t('m.todo.saveFailed', 'Could not save your change.');
 
-  /** A 409 carries the current item: show it and say so. Anything else is an error line. */
-  function handleError(err: unknown): void {
+  type Outcome = { ok: boolean; conflict: WireItem | null; gone: boolean };
+  const CHANGED = (): string => t('m.todo.conflict', 'Someone else changed this item. It has been refreshed.');
+
+  /**
+   * A 409 carries the current item: show it and say so. A 404 means somebody deleted the item: reload the list and say
+   * so too. Anything else is an error line.
+   */
+  function handleError(err: unknown): Outcome {
     const current = conflictItem(err);
     if (current && held) {
       held = withItem(held, current);
-      hint = t('m.todo.conflict', 'Someone else changed this item. It has been refreshed.');
-    } else {
-      error = failure(err);
+      hint = CHANGED();
+      return { ok: false, conflict: current, gone: false };
     }
+    if (isGone(err)) {
+      hint = CHANGED();
+      load();
+      return { ok: false, conflict: null, gone: true };
+    }
+    error = failure(err);
+    return { ok: false, conflict: null, gone: false };
   }
 
   // Calls run one after another, each against the list the previous one produced.
-  const send = serial(async (call: () => Promise<ItemList>): Promise<boolean> => {
+  const send = serial(async (call: () => Promise<ItemList>): Promise<Outcome> => {
     try {
       apply(await call());
-      return true;
+      return { ok: true, conflict: null, gone: false };
     } catch (err) {
-      handleError(err);
-      return false;
+      return handleError(err);
     }
   });
 
   function reset(): void {
     error = '';
     hint = '';
+    conflict = null;
   }
 
   function load(): void {
-    api.get<ItemList>('/items', { timeZone }).then(
+    api.get<ItemList>('/items').then(
       (list) => {
         apply(list);
         loaded = true;
@@ -136,7 +150,7 @@
     busyIds[row.id] = true;
     overrides[row.id] = !row.done;
     try {
-      await send(() => api.post<ItemList>(`/items/${row.id}/done`, { version: row.version, done: !row.done, timeZone }));
+      await send(() => api.post<ItemList>(`/items/${row.id}/done`, { version: row.version, done: !row.done }));
     } finally {
       delete overrides[row.id];
       delete busyIds[row.id];
@@ -146,7 +160,7 @@
   async function saveOrder(ids: string[]): Promise<void> {
     if (held) held = { ...held, order: { ...held.order, [tab]: ids } };
     reset();
-    await send(() => api.put<ItemList>('/order', { list: tab, ids, timeZone }));
+    await send(() => api.put<ItemList>('/order', { list: tab, ids }));
   }
   function move(row: Row, delta: -1 | 1): void {
     const ids = [...openIds];
@@ -179,14 +193,14 @@
     saving = true;
     reset();
     const { due, ...rest } = values;
-    const fields = { ...rest, ...(due === undefined ? {} : { due }), timeZone };
+    const fields = { ...rest, ...(due === undefined ? {} : { due }) };
     try {
-      const ok = await send(() =>
+      const res = await send(() =>
         item
           ? api.patch<ItemList>(`/items/${item.id}`, { version: item.version, ...fields })
           : api.post<ItemList>('/items', { list: tab, ...fields }),
       );
-      if (ok || hint) await closeEditor();
+      await afterEdit(res);
     } finally {
       saving = false;
     }
@@ -198,16 +212,25 @@
     saving = true;
     reset();
     try {
-      const ok = await send(() => api.delete<ItemList>(`/items/${item.id}?version=${item.version}`));
-      if (ok || hint) await closeEditor();
+      const res = await send(() => api.delete<ItemList>(`/items/${item.id}?version=${item.version}`));
+      await afterEdit(res);
     } finally {
       saving = false;
     }
   }
 
+  /** Done and gone close the editor. A conflict keeps it open with what the user typed and shows the current values. */
+  async function afterEdit(res: Outcome): Promise<void> {
+    if (res.ok || res.gone) await closeEditor();
+    else if (res.conflict) {
+      editing = { item: res.conflict }; // the next save carries the current version: the user decides
+      conflict = res.conflict;
+    }
+  }
+
   async function clearDone(): Promise<void> {
     reset();
-    await send(() => api.post<ItemList>('/items/clear-done', { list: tab, timeZone }));
+    await send(() => api.post<ItemList>('/items/clear-done', { list: tab }));
   }
 </script>
 
@@ -241,6 +264,8 @@
         {users}
         {t}
         {timeZone}
+        {locale}
+        current={conflict}
         busy={saving}
         {error}
         onsave={save}

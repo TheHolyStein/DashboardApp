@@ -62,7 +62,7 @@ export function buildSnapshot(
     done: i.done,
     version: i.version,
   }));
-  return { epoch: stamp.epoch, rev: stamp.rev, counts, items: rows, canEdit: true };
+  return { epoch: stamp.epoch, rev: stamp.rev, timeZone, counts, items: rows, canEdit: true };
 }
 
 /** What `todo.day.summary` says about one user: their open overdue items and the ones due today (local day). */

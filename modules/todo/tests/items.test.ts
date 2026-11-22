@@ -3,7 +3,7 @@ import { DashError } from '@dash/contract';
 import { applyMigrations, createMockHost, type MockHost } from '@dash/module-kit/testing';
 import manifest from '../manifest.js';
 import { migrations } from '../server/migrations.js';
-import { completeItem, createItem, getItem, visibleTo, type NewItem } from '../server/items.js';
+import { completeItem, createItem, getItem, reopenItem, updateItem, visibleTo, type NewItem } from '../server/items.js';
 
 const NOW = new Date('2026-11-18T09:00:00Z'); // Wednesday
 let host: MockHost;
@@ -119,5 +119,99 @@ describe('repeating chores', () => {
     const again = completeItem(host.store.db, item.id, 'a', first.item.version, NOW, 'UTC');
     expect(again.next).toBeNull();
     expect(host.store.db.all('SELECT id FROM m_todo_items WHERE title = ?', ['Bins'])).toHaveLength(2);
+  });
+
+  it('undoing a done chore removes the untouched next occurrence; completing again spawns exactly one', () => {
+    const db = host.store.db;
+    const item = chore();
+    const first = completeItem(db, item.id, 'a', item.version, NOW, 'UTC');
+    expect(first.item.spawnedId).toBe(first.next!.id);
+    const re = reopenItem(db, item.id, 'a', first.item.version, NOW, 'UTC');
+    expect(re.removedId).toBe(first.next!.id);
+    expect(getItem(db, first.next!.id)).toBeUndefined();
+    expect(re.item.done).toBe(false);
+    const second = completeItem(db, item.id, 'a', re.item.version, NOW, 'UTC');
+    expect(second.next!.assigneeId).toBe('b'); // rotated once, not twice
+    expect(second.next!.rotationIdx).toBe(1);
+    expect(db.all('SELECT id FROM m_todo_items WHERE title = ? AND done = 0', ['Bins'])).toHaveLength(1);
+  });
+
+  it('a next occurrence somebody touched stays on undo, and completing again does not spawn another', () => {
+    const db = host.store.db;
+    const item = chore();
+    const first = completeItem(db, item.id, 'a', item.version, NOW, 'UTC');
+    updateItem(db, first.next!.id, 'a', 1, { note: 'bring gloves' }, NOW, 'UTC');
+    const re = reopenItem(db, item.id, 'a', first.item.version, NOW, 'UTC');
+    expect(re.removedId).toBeNull();
+    expect(getItem(db, first.next!.id)?.note).toBe('bring gloves');
+    const second = completeItem(db, item.id, 'a', re.item.version, NOW, 'UTC');
+    expect(second.next).toBeNull();
+    expect(db.all('SELECT id FROM m_todo_items WHERE title = ? AND done = 0', ['Bins'])).toHaveLength(1);
+  });
+
+  it('a failed spawn rolls back the done mark', () => {
+    const db = host.store.db;
+    const item = chore({ title: 'Doomed' });
+    db.run(`CREATE TRIGGER m_todo_items_fail BEFORE INSERT ON m_todo_items BEGIN SELECT RAISE(ABORT, 'no spawn'); END`);
+    expect(() => completeItem(db, item.id, 'a', item.version, NOW, 'UTC')).toThrow();
+    const row = getItem(db, item.id)!;
+    expect(row.done).toBe(false);
+    expect(row.version).toBe(item.version);
+    expect(row.spawnedId).toBeNull();
+  });
+
+  it('a monthly chore keeps its anchor day (31 Jan, 28 Feb, 31 Mar)', () => {
+    const db = host.store.db;
+    const monthly = chore({ repeatUnit: 'month', repeatEvery: 1, rotation: [], due: '2026-01-31T10:00:00Z' });
+    const feb = completeItem(db, monthly.id, 'a', monthly.version, NOW, 'UTC').next!;
+    expect(feb.due).toBe('2026-02-28T10:00:00.000Z');
+    expect(completeItem(db, feb.id, 'a', feb.version, NOW, 'UTC').next!.due).toBe('2026-03-31T10:00:00.000Z');
+  });
+
+  it('undoing a done chore removes the untouched next occurrence; completing again spawns exactly one', () => {
+    const db = host.store.db;
+    const item = chore();
+    const first = completeItem(db, item.id, 'a', item.version, NOW, 'UTC');
+    expect(first.item.spawnedId).toBe(first.next!.id);
+    const re = reopenItem(db, item.id, 'a', first.item.version, NOW, 'UTC');
+    expect(re.removedId).toBe(first.next!.id);
+    expect(getItem(db, first.next!.id)).toBeUndefined();
+    expect(re.item.done).toBe(false);
+    const second = completeItem(db, item.id, 'a', re.item.version, NOW, 'UTC');
+    expect(second.next!.assigneeId).toBe('b'); // rotated once, not twice
+    expect(second.next!.rotationIdx).toBe(1);
+    expect(db.all('SELECT id FROM m_todo_items WHERE title = ? AND done = 0', ['Bins'])).toHaveLength(1);
+  });
+
+  it('a next occurrence somebody touched stays on undo, and completing again does not spawn another', () => {
+    const db = host.store.db;
+    const item = chore();
+    const first = completeItem(db, item.id, 'a', item.version, NOW, 'UTC');
+    updateItem(db, first.next!.id, 'a', 1, { note: 'bring gloves' }, NOW, 'UTC');
+    const re = reopenItem(db, item.id, 'a', first.item.version, NOW, 'UTC');
+    expect(re.removedId).toBeNull();
+    expect(getItem(db, first.next!.id)?.note).toBe('bring gloves');
+    const second = completeItem(db, item.id, 'a', re.item.version, NOW, 'UTC');
+    expect(second.next).toBeNull();
+    expect(db.all('SELECT id FROM m_todo_items WHERE title = ? AND done = 0', ['Bins'])).toHaveLength(1);
+  });
+
+  it('a failed spawn rolls back the done mark', () => {
+    const db = host.store.db;
+    const item = chore({ title: 'Doomed' });
+    db.run(`CREATE TRIGGER m_todo_items_fail BEFORE INSERT ON m_todo_items BEGIN SELECT RAISE(ABORT, 'no spawn'); END`);
+    expect(() => completeItem(db, item.id, 'a', item.version, NOW, 'UTC')).toThrow();
+    const row = getItem(db, item.id)!;
+    expect(row.done).toBe(false);
+    expect(row.version).toBe(item.version);
+    expect(row.spawnedId).toBeNull();
+  });
+
+  it('a monthly chore keeps its anchor day (31 Jan, 28 Feb, 31 Mar)', () => {
+    const db = host.store.db;
+    const monthly = chore({ repeatUnit: 'month', repeatEvery: 1, rotation: [], due: '2026-01-31T10:00:00Z' });
+    const feb = completeItem(db, monthly.id, 'a', monthly.version, NOW, 'UTC').next!;
+    expect(feb.due).toBe('2026-02-28T10:00:00.000Z');
+    expect(completeItem(db, feb.id, 'a', feb.version, NOW, 'UTC').next!.due).toBe('2026-03-31T10:00:00.000Z');
   });
 });

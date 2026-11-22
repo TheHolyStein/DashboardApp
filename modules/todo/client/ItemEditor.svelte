@@ -4,7 +4,7 @@
   import type { Translate } from '@dash/contract';
   import { Button, Field } from '@dash/ui';
   import type { RepeatUnit, TodoListId, WireItem } from '../manifest.js';
-  import { localDay } from './format.js';
+  import { formatDue, localDay } from './format.js';
   import IconPicker from './IconPicker.svelte';
   import type { EditorValues } from './model.js';
 
@@ -15,13 +15,18 @@
     users: User[];
     t: Translate;
     timeZone: string;
+    locale: string;
+    /** After a 409: the item as it is on the server now. The inputs keep what the user typed. */
+    current?: WireItem | null;
     busy: boolean;
     error: string;
     onsave: (v: EditorValues) => void;
     oncancel: () => void;
     ondelete?: () => void;
   };
-  let { item, list, users, t, timeZone, busy, error, onsave, oncancel, ondelete }: Props = $props();
+  let { item, list, users, t, timeZone, locale, current = null, busy, error, onsave, oncancel, ondelete }: Props = $props();
+
+  const nameOf = (id: string | null): string => (id === null ? '' : (users.find((u) => u.id === id)?.name ?? ''));
 
   const initial = untrack(() => item);
   const initialDay = untrack(() => (initial?.due ? localDay(initial.due, timeZone) : ''));
@@ -61,6 +66,18 @@
 </script>
 
 <form class="editor" onsubmit={submit}>
+  {#if current}
+    <div class="conflict" role="status">
+      <strong>{t('m.todo.conflictEditor', 'Someone else changed this item. Your input is kept; saving overwrites these values:')}</strong>
+      <dl>
+        <dt>{t('m.todo.titleLabel', 'Title')}</dt>
+        <dd data-user>{current.title}</dd>
+        {#if current.note}<dt>{t('m.todo.note', 'Note')}</dt><dd data-user>{current.note}</dd>{/if}
+        {#if current.due}<dt>{t('m.todo.due', 'Due')}</dt><dd data-value>{formatDue(current.due, { locale, timeZone })}</dd>{/if}
+        {#if current.assigneeId}<dt>{t('m.todo.assignee', 'Assigned to')}</dt><dd data-user>{nameOf(current.assigneeId)}</dd>{/if}
+      </dl>
+    </div>
+  {/if}
   <Field label={t('m.todo.titleLabel', 'Title')}>
     {#snippet children({ describedBy, invalid })}
       <input data-edit bind:value={title} required maxlength="200" aria-describedby={describedBy} aria-invalid={invalid} />
@@ -140,5 +157,9 @@
   .num { width: 4.5rem; }
   fieldset { border: var(--db-border, 1px solid #c9ced6); border-radius: var(--db-radius, 8px); margin: 0 0 var(--db-gap, 8px); }
   .error { margin: 0; border-left: 3px solid var(--db-crit); padding-left: 0.5em; }
+  .conflict { margin-bottom: 0.5rem; border-left: 3px solid var(--db-warn, var(--db-accent)); padding-left: 0.5em; }
+  .conflict dl { display: grid; grid-template-columns: auto 1fr; gap: 0 0.75rem; margin: 0.25rem 0 0; }
+  .conflict dt { color: var(--db-muted); }
+  .conflict dd { margin: 0; }
   .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 </style>

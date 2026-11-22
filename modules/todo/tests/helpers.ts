@@ -5,9 +5,9 @@ import type { ItemList, WireItem } from '../manifest.js';
 
 export const NOW = new Date('2026-11-18T09:00:00Z'); // a Wednesday
 export const USERS = [
-  { id: 'u1', name: 'Dana', handle: 'dani' },
-  { id: 'u2', name: 'Eli', handle: 'eli' },
-  { id: 'u3', name: 'Fay', handle: 'fay' },
+  { id: 'u1', name: 'Dana', handle: 'dani', role: 'admin' as const, timeZone: 'UTC' },
+  { id: 'u2', name: 'Eli', handle: 'eli', role: 'member' as const, timeZone: 'UTC' },
+  { id: 'u3', name: 'Fay', handle: 'fay', role: 'member' as const, timeZone: 'UTC' },
 ];
 
 export async function setup(instances: ModuleInstance[] = []): Promise<{ host: MockHost; router: MockRouter }> {

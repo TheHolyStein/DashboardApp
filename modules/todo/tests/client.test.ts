@@ -65,7 +65,7 @@ function tileProps(over: Partial<Omit<TileProps<Snapshot, Settings>, 'api'>> & {
 
 const wire = (over: Partial<WireItem> & { id: string; title: string }): WireItem => ({
   list: 'shopping', icon: null, note: null, qty: null, due: null, ownerId: 'u1', assigneeId: null, visibility: 'shared', done: false,
-  doneAt: null, doneBy: null, version: 1, url: null, sourceKey: null, repeatEvery: null, repeatUnit: null, rotation: [], rotationIdx: 0,
+  doneAt: null, doneBy: null, version: 1, url: null, fromCalendar: false, repeatEvery: null, repeatUnit: null, rotation: [], rotationIdx: 0,
   createdAt: NOW, updatedAt: NOW, bucket: 'none', ...over,
 });
 const stamp = { epoch: EPOCH, rev: 5, userId: 'u1' };
@@ -104,7 +104,7 @@ describe('Tile', () => {
     expect(box).toBeTruthy();
     box.click();
     await settle();
-    expect(api.post).toHaveBeenCalledWith('/items/i3/done', { version: 4, done: true, timeZone: 'UTC' });
+    expect(api.post).toHaveBeenCalledWith('/items/i3/done', { version: 4, done: true });
     expect(root.querySelector('li[data-id="i3"]')?.classList.contains('done')).toBe(true); // shown at once
   });
 
@@ -116,7 +116,7 @@ describe('Tile', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(api.post).toHaveBeenCalledWith('/items', { list: 'week', title: 'Buy milk', assigneeHandle: 'dani', timeZone: 'UTC' });
+    expect(api.post).toHaveBeenCalledWith('/items', { list: 'week', title: 'Buy milk', assigneeHandle: 'dani' });
     expect(input.value).toBe('');
   });
 
@@ -134,7 +134,7 @@ describe('Tile', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(api.post).toHaveBeenCalledWith('/items', { list: 'week', title: 'Plain', timeZone: 'UTC' });
+    expect(api.post).toHaveBeenCalledWith('/items', { list: 'week', title: 'Plain' });
   });
 
   test('a failing done call shows an error and unticks; a 409 shows the hint instead', async () => {
@@ -183,6 +183,55 @@ describe('Tile', () => {
     expect(target.querySelector('li[data-id="i2"]')).toBeTruthy();
   });
 
+  test('a pushed snapshot where the ticked item is unchanged keeps the tick while the request runs; a changed item drops it', async () => {
+    const post = vi.fn(() => new Promise<ItemList>(() => undefined)); // the request never settles
+    const target = document.body.appendChild(document.createElement('div'));
+    const props = reactiveProps(tileProps({ api: fakeApi({ post }) }));
+    const instance = mount(client.Tile, { target, props });
+    mounted.push(() => void unmount(instance));
+    flushSync();
+    target.querySelector<HTMLInputElement>('li[data-id="i3"] input')!.click();
+    await settle();
+    const done = () => target.querySelector('li[data-id="i3"]')?.classList.contains('done');
+    expect(done()).toBe(true);
+    props.data = { ...fixture, rev: fixture.rev + 1 }; // some other change: i3 is as before
+    await settle();
+    expect(done()).toBe(true);
+    props.data = { ...fixture, rev: fixture.rev + 2, items: fixture.items.map((i) => (i.id === 'i3' ? { ...i, version: i.version + 1 } : i)) };
+    await settle();
+    expect(done()).toBe(false); // the item changed on the server: the snapshot is the truth
+  });
+
+  test('a settled tick is dropped by the next snapshot', async () => {
+    const post = vi.fn(() => Promise.resolve(itemList([])));
+    const target = document.body.appendChild(document.createElement('div'));
+    const props = reactiveProps(tileProps({ api: fakeApi({ post }) }));
+    const instance = mount(client.Tile, { target, props });
+    mounted.push(() => void unmount(instance));
+    flushSync();
+    target.querySelector<HTMLInputElement>('li[data-id="i3"] input')!.click();
+    await settle();
+    expect(target.querySelector('li[data-id="i3"]')?.classList.contains('done')).toBe(true);
+    props.data = { ...fixture, rev: fixture.rev + 1 };
+    await settle();
+    expect(target.querySelector('li[data-id="i3"]')?.classList.contains('done')).toBe(false);
+  });
+
+  test('a 404 on tick (deleted by someone else) shows the conflict hint', async () => {
+    const post = vi.fn(() => Promise.reject(new DashError('not_found', 'item not found')));
+    const root = show(client.Tile, tileProps({ api: fakeApi({ post }) }));
+    root.querySelector<HTMLInputElement>('li[data-id="i3"] input')!.click();
+    await settle();
+    expect(root.querySelector('[role=status]')?.textContent).toContain('Someone else changed');
+    expect(root.querySelector('[role=alert]')).toBeNull();
+  });
+
+  test('groups use the zone of the snapshot, not the viewer zone', () => {
+    const own = [...show(client.Tile, tileProps()).querySelectorAll('h4')].map((h) => h.textContent?.replace(/\s+/g, ' ').trim());
+    const viewer = [...show(client.Tile, tileProps({ timeZone: 'Pacific/Kiritimati' })).querySelectorAll('h4')].map((h) => h.textContent?.replace(/\s+/g, ' ').trim());
+    expect(viewer).toEqual(own);
+  });
+
   test('at the minimum size a short flat list shows, without headers or quick add', () => {
     const root = show(client.Tile, tileProps({ size: { w: 2, h: 2 } }));
     expect(root.querySelectorAll('li')).toHaveLength(3);
@@ -201,7 +250,7 @@ describe('Detail', () => {
     expect(root.querySelector('li[data-id="m1"] .title')?.textContent).toBe('Milk');
     root.querySelector<HTMLInputElement>('li[data-id="m1"] input[type=checkbox]')!.click();
     await settle();
-    expect(post).toHaveBeenCalledWith('/items/m1/done', { version: 1, done: true, timeZone: 'UTC' });
+    expect(post).toHaveBeenCalledWith('/items/m1/done', { version: 1, done: true });
     expect(root.querySelector('li[data-id="m1"] .title')?.textContent).toBe('Oat milk');
     expect(root.querySelector('[role=status]')?.textContent).toContain('Someone else changed');
     expect(root.querySelector('[role=alert]')).toBeNull();
@@ -220,7 +269,7 @@ describe('Detail', () => {
     expect(eggs.getAttribute('aria-pressed')).toBe('false');
     eggs.click();
     await settle();
-    expect(post).toHaveBeenCalledWith('/items/a/done', { version: 3, done: true, timeZone: 'UTC' });
+    expect(post).toHaveBeenCalledWith('/items/a/done', { version: 3, done: true });
     expect(eggs.getAttribute('aria-pressed')).toBe('true');
     expect(eggs.classList.contains('struck')).toBe(true);
     expect(byText(store, 'button.item', 'Bread').classList.contains('struck')).toBe(false);
@@ -248,11 +297,11 @@ describe('Detail', () => {
     expect([...root.querySelectorAll('li .title')].map((e) => e.textContent)).toEqual(['C', 'A', 'B']);
     root.querySelector<HTMLElement>('li[data-id="c"] button[aria-label^="Move down"]')!.click();
     await settle();
-    expect(put).toHaveBeenCalledWith('/order', { list: 'shopping', ids: ['a', 'c', 'b'], timeZone: 'UTC' });
+    expect(put).toHaveBeenCalledWith('/order', { list: 'shopping', ids: ['a', 'c', 'b'] });
     expect([...root.querySelectorAll('li .title')].map((e) => e.textContent)).toEqual(['A', 'C', 'B']);
   });
 
-  test('add item sends the editor values with the list and the time zone', async () => {
+  test('add item sends the editor values with the list, and no time zone', async () => {
     const post = vi.fn<(path: string, body: unknown) => Promise<ItemList>>(() => Promise.resolve(itemList([])));
     const root = show(client.Detail, detailProps(detailApi(itemList([]), { post }), { params: { list: 'week' } }));
     await settle();
@@ -263,9 +312,62 @@ describe('Detail', () => {
     title.dispatchEvent(new Event('input', { bubbles: true }));
     root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
-    expect(post).toHaveBeenCalledWith('/items', expect.objectContaining({ list: 'week', title: 'Plan the trip', assigneeId: null, timeZone: 'UTC' }));
+    expect(post).toHaveBeenCalledWith('/items', expect.objectContaining({ list: 'week', title: 'Plan the trip', assigneeId: null }));
+    expect(post.mock.calls[0]?.[1]).not.toHaveProperty('timeZone');
     expect(post.mock.calls[0]?.[1]).not.toHaveProperty('due'); // untouched: the server's implicit due applies
     expect(root.querySelector('form')).toBeNull(); // editor closed
+  });
+
+  test('404 on an item somebody deleted: the list reloads and the hint shows', async () => {
+    const milk = wire({ id: 'm1', title: 'Milk' });
+    const get = vi.fn()
+      .mockImplementationOnce((path: string) => Promise.resolve(path === '/users' ? USERS : itemList([milk])))
+      .mockImplementation((path: string) => Promise.resolve(path === '/users' ? USERS : itemList([])));
+    const post = vi.fn(() => Promise.reject(new DashError('not_found', 'item not found')));
+    const root = show(client.Detail, detailProps(fakeApi({ get, post }), { params: { list: 'shopping' } }));
+    await settle();
+    expect(root.querySelector('li[data-id="m1"]')).toBeTruthy();
+    root.querySelector<HTMLInputElement>('li[data-id="m1"] input[type=checkbox]')!.click();
+    await settle();
+    expect(root.querySelector('li[data-id="m1"]')).toBeNull();
+    expect(root.querySelector('[role=status]')?.textContent).toContain('Someone else changed');
+  });
+
+  test('a 409 on save keeps the editor open with the typed input and shows the current server values', async () => {
+    const milk = wire({ id: 'm1', title: 'Milk', version: 1 });
+    const current = wire({ id: 'm1', title: 'Oat milk', version: 2, note: 'from the market' });
+    const patch = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new DashError('conflict', 'changed', { item: current })))
+      .mockImplementation(() => Promise.resolve(itemList([{ ...current, title: 'My milk', version: 3 }])));
+    const root = show(client.Detail, detailProps(detailApi(itemList([milk]), { patch }), { params: { list: 'shopping' } }));
+    await settle();
+    root.querySelector<HTMLElement>('li[data-id="m1"] button[aria-label^="Edit"]')!.click();
+    await settle();
+    const title = root.querySelector<HTMLInputElement>('form input[maxlength="200"]')!;
+    title.value = 'My milk';
+    title.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const form = root.querySelector('form')!;
+    expect(form).toBeTruthy(); // still open
+    expect(root.querySelector<HTMLInputElement>('form input[maxlength="200"]')!.value).toBe('My milk'); // input kept
+    expect(form.querySelector('.conflict')?.textContent).toContain('Oat milk');
+    expect(form.querySelector('.conflict')?.textContent).toContain('from the market');
+    root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(patch).toHaveBeenLastCalledWith('/items/m1', expect.objectContaining({ version: 2, title: 'My milk' }));
+    expect(root.querySelector('form')).toBeNull();
+  });
+
+  test('icon buttons are labelled through t()', async () => {
+    const seen: string[] = [];
+    const t = ((key: string, fallback: string) => (seen.push(key), fallback)) as typeof identityT;
+    const root = show(client.Detail, detailProps(detailApi(itemList([])), { params: { list: 'week' }, t }));
+    await settle();
+    byText(root, 'button', 'Add item').click();
+    await settle();
+    expect(seen).toContain('m.todo.icon.todo');
+    expect(root.querySelector('button[aria-label="todo"]')).toBeTruthy(); // the fallback is the key
   });
 
   test('on a shared page (not owner) the snapshot is shown read-only and no route is called', async () => {

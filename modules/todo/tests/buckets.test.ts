@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bucketOf, endOfIsoWeek, endOfMonth, localDate } from '../server/buckets.js';
+import { addInterval, bucketOf, endOfIsoWeek, endOfMonth, localDate } from '../server/buckets.js';
 
 const due = (iso: string | null) => ({ due: iso });
 
@@ -45,5 +45,24 @@ describe('period ends', () => {
   });
   it('localDate formats the local calendar day', () => {
     expect(localDate(new Date('2026-11-18T23:30:00Z'), 'Asia/Kolkata')).toBe('2026-11-19');
+  });
+});
+
+describe('addInterval around DST', () => {
+  const berlin = 'Europe/Berlin';
+  it('a wall-clock time inside the spring-forward gap moves forward, the next day is back at that time', () => {
+    const due = new Date('2026-03-28T01:30:00Z'); // 02:30 CET
+    // 2026-03-29 02:30 does not exist in Berlin: the clock jumps 02:00 -> 03:00
+    expect(addInterval(due, 1, 'day', berlin).toISOString()).toBe('2026-03-29T01:30:00.000Z'); // 03:30 CEST
+    expect(addInterval(due, 2, 'day', berlin).toISOString()).toBe('2026-03-30T00:30:00.000Z'); // 02:30 CEST
+    expect(addInterval(due, 1, 'week', berlin).toISOString()).toBe('2026-04-04T00:30:00.000Z');
+  });
+  it('a day step across the fall-back keeps the wall-clock time', () => {
+    const due = new Date('2026-10-24T09:00:00Z'); // 11:00 CEST
+    expect(addInterval(due, 1, 'day', berlin).toISOString()).toBe('2026-10-25T10:00:00.000Z'); // 11:00 CET
+  });
+  it('a month step keeps the anchor day', () => {
+    expect(addInterval(new Date('2026-02-28T10:00:00Z'), 1, 'month', 'UTC', 31).toISOString()).toBe('2026-03-31T10:00:00.000Z');
+    expect(addInterval(new Date('2026-01-31T10:00:00Z'), 1, 'month', 'UTC', 31).toISOString()).toBe('2026-02-28T10:00:00.000Z');
   });
 });

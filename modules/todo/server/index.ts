@@ -23,11 +23,9 @@ import { buildSnapshot, buildSummary, sortItems, type DaySummary } from './snaps
 
 const REV_KEY = 'rev';
 const ORDER_PREFIX = 'order:';
-const TZ_PREFIX = 'tz:';
 const PURGE_DONE_DAYS = 30;
 const MAX_ORDER = 500;
 
-const timeZoneField = z.string().max(64).optional();
 const fields = {
   icon: z.string().max(32).nullish(),
   note: z.string().nullish(),
@@ -41,19 +39,18 @@ const fields = {
   repeatEvery: z.number().int().nullish(),
   repeatUnit: z.enum(['day', 'week', 'month']).nullish(),
   rotation: z.array(z.string().max(80)).optional(),
-  timeZone: timeZoneField,
 };
 const NewBody = z.object({ list: TodoList, title: z.string(), ...fields });
 const PatchBody = z.object({ version: z.number().int(), list: TodoList.optional(), title: z.string().optional(), ...fields });
-const DoneBody = z.object({ version: z.number().int(), done: z.boolean(), timeZone: timeZoneField });
+const DoneBody = z.object({ version: z.number().int(), done: z.boolean() });
 const VersionBody = z.object({ version: z.number().int() }).optional();
 const VersionQuery = z.object({ version: z.coerce.number().int().optional() });
-const ClearBody = z.object({ list: TodoList, timeZone: timeZoneField });
-const OrderBody = z.object({ list: TodoList, ids: z.array(z.string()).max(MAX_ORDER), timeZone: timeZoneField });
-const ListQuery = z.object({ list: TodoList.optional(), show: z.enum(['mine', 'all']).optional(), timeZone: timeZoneField });
+const ClearBody = z.object({ list: TodoList });
+const OrderBody = z.object({ list: TodoList, ids: z.array(z.string()).max(MAX_ORDER) });
+const ListQuery = z.object({ list: TodoList.optional(), show: z.enum(['mine', 'all']).optional() });
 
 type Change = { itemId: string; kind: 'created' | 'updated' | 'done' | 'deleted' };
-type User = { id: string; name: string; handle: string };
+type User = Awaited<ReturnType<HostServices['users']>>[number];
 
 interface State {
   pusher: SnapshotPusher;
@@ -67,22 +64,10 @@ interface State {
   rev: number;
   /** `<user>:<list>` -> the user's own order of item ids. Persisted in the store under `order:<user>:<list>`. */
   orders: Map<string, string[]>;
-  /** The user's last reported time zone (`tz:<user>`). Needed for buckets in jobs and event handlers. */
-  zones: Map<string, string>;
   /** Last published day summary per user, as JSON without the date: publish only when it changed. */
   summaries: Map<string, string>;
   /** The date of the last published non-empty summary per user. */
   summaryDates: Map<string, string>;
-}
-
-function validZone(zone: string | undefined): string | undefined {
-  if (!zone) return undefined;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: zone });
-    return zone;
-  } catch {
-    return undefined;
-  }
 }
 
 function createServer() {
@@ -103,17 +88,9 @@ function createServer() {
       host.log.error('todo: saving the revision failed', { err: String(err) });
     }
   };
-  const zoneOf = (userId: string): string => need().zones.get(userId) ?? 'UTC';
-  /** Remembers the zone a user's client reported (best effort persistence). */
-  const learnZone = (host: HostServices, userId: string, zone: string | undefined): string => {
-    const z = validZone(zone);
-    if (!z) return zoneOf(userId);
-    if (need().zones.get(userId) !== z) {
-      need().zones.set(userId, z);
-      host.store.set(TZ_PREFIX + userId, z).catch((err: unknown) => host.log.error('todo: saving the time zone failed', { err: String(err) }));
-    }
-    return z;
-  };
+  /** The IANA zone a user saved (UTC when unknown), read from `host.users()` on every call: no copy to go stale. */
+  const zoneIn = (users: User[], userId: string | null | undefined): string => users.find((u) => u.id === userId)?.timeZone ?? 'UTC';
+  const zoneOf = async (host: HostServices, userId: string | null | undefined): Promise<string> => zoneIn(await host.users(), userId);
 
   /** The caller's visible items with their stamp, read in one synchronous step. */
   const listOf = (host: HostServices, userId: string, zone: string): ItemList => {
@@ -139,7 +116,7 @@ function createServer() {
     const st = stamp(); // before the first await
     const [instances, users] = await wait(Promise.all([host.instances(), host.users()]));
     const now = host.now();
-    const built = instances.map((inst) => ({ inst, snap: buildSnapshot(host.store.db, inst, st, users, now, zoneOf(inst.ownerId)) }));
+    const built = instances.map((inst) => ({ inst, snap: buildSnapshot(host.store.db, inst, st, users, now, zoneIn(users, inst.ownerId)) }));
     const live = new Set((await wait(host.instances())).map((i) => i.id));
     for (const { inst, snap } of built) if (live.has(inst.id)) s.pusher.push(inst.id, snap);
   };
@@ -150,7 +127,7 @@ function createServer() {
     const users: User[] = signal ? await abortable(signal, host.users()) : await host.users();
     const now = host.now();
     for (const u of users) {
-      const summary: DaySummary = buildSummary(host.store.db, u.id, now, zoneOf(u.id));
+      const summary: DaySummary = buildSummary(host.store.db, u.id, now, u.timeZone);
       const key = JSON.stringify({ overdue: summary.overdue, due: summary.due });
       const empty = summary.overdue === 0 && summary.due.length === 0;
       const previous = s.summaries.get(u.id) ?? JSON.stringify({ overdue: 0, due: [] });
@@ -207,6 +184,14 @@ function createServer() {
     return body.assigneeId;
   };
 
+  /** Rotation members must be known users: 422 otherwise. */
+  const checkRotation = async (host: HostServices, rotation: string[] | undefined): Promise<void> => {
+    if (!rotation || rotation.length === 0) return;
+    const known = new Set((await host.users()).map((u) => u.id));
+    const stranger = rotation.find((id) => id !== '' && !known.has(id));
+    if (stranger !== undefined) throw new DashError('invalid', 'unknown user in the rotation');
+  };
+
   const applied = (a: Applied): Change => ({ itemId: a.item.id, kind: a.kind });
 
   return defineServer({
@@ -219,18 +204,12 @@ function createServer() {
         const ids = await host.store.get<string[]>(key);
         if (Array.isArray(ids)) orders.set(key.slice(ORDER_PREFIX.length), ids);
       }
-      const zones = new Map<string, string>();
-      for (const key of await host.store.keys(TZ_PREFIX)) {
-        const zone = await host.store.get<string>(key);
-        if (typeof zone === 'string') zones.set(key.slice(TZ_PREFIX.length), zone);
-      }
       const rev = await host.store.get<number>(REV_KEY);
       state = {
         pusher: createSnapshotPusher(host),
         epoch: newId(host.now()),
         rev: typeof rev === 'number' ? rev : 0,
         orders,
-        zones,
         summaries: new Map(),
         summaryDates: new Map(),
       };
@@ -249,17 +228,20 @@ function createServer() {
 
     on: {
       'todo.create.request': async (req, host) => {
-        const zone = req.assigneeId ? zoneOf(req.assigneeId) : 'UTC';
-        const res = applyCreateRequest(host.store.db, req, host.now(), zone);
+        const res = applyCreateRequest(host.store.db, req, host.now(), await zoneOf(host, req.ownerId ?? req.assigneeId));
         if (res) await finish(host, [applied(res)], bump());
       },
       'todo.remove.request': async (req, host) => {
         const gone = applyRemoveRequest(host.store.db, req.sourceKey);
-        if (gone) await finish(host, [{ itemId: gone.id, kind: 'deleted' }], bump());
+        if (gone.length > 0) await finish(host, gone.map((g) => ({ itemId: g.id, kind: 'deleted' as const })), bump());
       },
+      // The publishing user's item; when the publisher is unknown, one private item per admin.
       'item.readLater': async (req, host) => {
-        const res = applyReadLater(host.store.db, req, host.now());
-        if (res) await finish(host, [applied(res)], bump());
+        const users = await host.users();
+        const named = users.find((u) => u.id === req.userId);
+        const owners = (named ? [named] : users.filter((u) => u.role === 'admin')).map((u) => ({ id: u.id, timeZone: u.timeZone }));
+        const res = applyReadLater(host.store.db, req, host.now(), owners);
+        if (res.length > 0) await finish(host, res.map(applied), bump());
       },
     },
 
@@ -272,10 +254,10 @@ function createServer() {
     routes(r, host) {
       const db = host.store.db;
 
-      r.get('/users', { level: 'view' }, () => host.users());
+      r.get('/users', { level: 'view' }, async () => (await host.users()).map((u) => ({ id: u.id, name: u.name, handle: u.handle })));
 
-      r.get('/items', { level: 'view', query: ListQuery }, (req) => {
-        const zone = learnZone(host, req.user.id, req.query.timeZone);
+      r.get('/items', { level: 'view', query: ListQuery }, async (req) => {
+        const zone = await zoneOf(host, req.user.id);
         const all = listOf(host, req.user.id, zone);
         const { list, show } = req.query;
         if (!list && show !== 'mine') return all;
@@ -289,8 +271,9 @@ function createServer() {
 
       r.post('/items', { level: 'edit', body: NewBody }, async (req) => {
         const b = req.body;
-        const zone = learnZone(host, req.user.id, b.timeZone);
+        const zone = await zoneOf(host, req.user.id);
         const assigneeId = await resolveAssignee(host, b);
+        await checkRotation(host, b.rotation);
         const patch: Patch = {
           icon: b.icon,
           note: b.note,
@@ -310,9 +293,10 @@ function createServer() {
       });
 
       r.patch('/items/:id', { level: 'edit', body: PatchBody }, async (req) => {
-        const { version, timeZone, assigneeHandle, ...rest } = req.body;
-        const zone = learnZone(host, req.user.id, timeZone);
+        const { version, assigneeHandle, ...rest } = req.body;
+        const zone = await zoneOf(host, req.user.id);
         const assigneeId = await resolveAssignee(host, { assigneeId: rest.assigneeId, assigneeHandle });
+        await checkRotation(host, rest.rotation);
         const patch: Patch = { ...stripUndefined(rest), ...(assigneeId === undefined ? {} : { assigneeId }) };
         const item = updateItem(db, req.params['id'] ?? '', req.user.id, version, patch, host.now(), zone);
         const rev = bump();
@@ -322,8 +306,8 @@ function createServer() {
       });
 
       r.post('/items/:id/done', { level: 'edit', body: DoneBody }, async (req) => {
-        const { version, done, timeZone } = req.body;
-        const zone = learnZone(host, req.user.id, timeZone);
+        const { version, done } = req.body;
+        const zone = await zoneOf(host, req.user.id);
         const id = req.params['id'] ?? '';
         const changes: Change[] = [];
         if (done) {
@@ -333,8 +317,9 @@ function createServer() {
           if (res.next) changes.push({ itemId: res.next.id, kind: 'created' });
         } else {
           const before = accessible(db, id, req.user.id);
-          const item = reopenItem(db, id, req.user.id, version, host.now(), zone);
-          if (before.done) changes.push({ itemId: item.id, kind: 'updated' });
+          const res = reopenItem(db, id, req.user.id, version, host.now(), zone);
+          if (before.done) changes.push({ itemId: res.item.id, kind: 'updated' });
+          if (res.removedId !== null) changes.push({ itemId: res.removedId, kind: 'deleted' });
         }
         const rev = changes.length > 0 ? bump() : need().rev;
         const list = listOf(host, req.user.id, zone);
@@ -346,7 +331,7 @@ function createServer() {
         // ModuleApi.delete sends no body, so the version may come as `?version=`.
         const version = req.body?.version ?? req.query.version;
         if (version === undefined) throw new DashError('invalid', 'version is required');
-        const zone = zoneOf(req.user.id);
+        const zone = await zoneOf(host, req.user.id);
         const item = deleteItem(db, req.params['id'] ?? '', req.user.id, version, host.now(), zone);
         const rev = bump();
         const list = listOf(host, req.user.id, zone);
@@ -355,7 +340,7 @@ function createServer() {
       });
 
       r.post('/items/clear-done', { level: 'edit', body: ClearBody }, async (req) => {
-        const zone = learnZone(host, req.user.id, req.body.timeZone);
+        const zone = await zoneOf(host, req.user.id);
         const ids = clearDone(db, req.user.id, req.body.list, host.now());
         const rev = ids.length > 0 ? bump() : need().rev;
         const list = listOf(host, req.user.id, zone);
@@ -363,14 +348,18 @@ function createServer() {
         return list;
       });
 
-      // The caller's own order of one list. Not a change to the shared data: no new rev, no snapshot.
+      // The caller's own order of one list. It raises the rev (so the answer is newer than what the client holds) but
+      // changes no snapshot content, so nothing is pushed.
       r.put('/order', { level: 'edit', body: OrderBody }, async (req) => {
-        const zone = learnZone(host, req.user.id, req.body.timeZone);
+        const zone = await zoneOf(host, req.user.id);
         const seen = new Set(visibleItems(db, req.user.id).filter((i) => i.list === req.body.list).map((i) => i.id));
         const ids = [...new Set(req.body.ids)].filter((id) => seen.has(id));
         need().orders.set(`${req.user.id}:${req.body.list}`, ids);
+        const rev = bump();
         const list = listOf(host, req.user.id, zone);
+        const saved = persistRev(host, rev);
         await host.store.set(`${ORDER_PREFIX}${req.user.id}:${req.body.list}`, ids);
+        await saved;
         return list;
       });
     },
