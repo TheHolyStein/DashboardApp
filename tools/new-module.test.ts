@@ -8,9 +8,10 @@ const ID = 'zz-scaffold-test';
 const THEME = 'zz-scaffold-theme';
 const lockFile = path.join(REPO_ROOT, 'pnpm-lock.yaml');
 const lockBefore = readFileSync(lockFile, 'utf8');
-// Linking a scaffolded package changes the lockfile (restored in afterAll), so this install may not be frozen —
-// on CI (CI=true) pnpm would otherwise default to --frozen-lockfile and refuse.
-const LINK = 'pnpm install --offline --no-frozen-lockfile';
+// Linking a scaffolded package changes the lockfile (restored in afterAll), so this install may not be frozen (on CI,
+// CI=true, pnpm would otherwise default to --frozen-lockfile and refuse). It also needs registry metadata, which a
+// frozen install never caches: prefer the cache, fetch only what is missing.
+const LINK = 'pnpm install --prefer-offline --no-frozen-lockfile';
 const run = (cmd: string): string => execSync(cmd, { cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' });
 
 afterAll(() => {
