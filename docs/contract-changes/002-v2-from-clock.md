@@ -136,6 +136,26 @@ Three additive completions made before any module beyond Clock exists. `CONTRACT
 - Affected: every client module and test that builds these props by hand.
 - Migration: add `isOwner: true` to hand-built props. On a shared page (`isOwner` false) show the owner's data read-only from the snapshot; do not call caller-scoped routes or render mutation controls. The module template now gates its edit controls on `level === 'edit' && isOwner`.
 
+## v2 completion: instance-scoped routes
+
+`CONTRACT_VERSION` stays 2. Additive.
+
+### F1. `instanceId` props, `x-dash-instance`, `RouteOptions.instance`
+- Problem: route handlers got `req.user` but no instance. A route taking an instance id (a weather detail `GET /detail?instanceId=...`) could not check that the caller may see the page holding it, and modules had no safe way to read that instance's settings.
+- Change (client): `TileProps`, `DetailProps`, `SettingsProps` gain required `instanceId: InstanceId`. The `api` the shell hands to a tile, detail or settings component is bound to that instance and sends `x-dash-instance: <instanceId>` on every call (`moduleApi(moduleId, instanceId)`).
+- Change (server): `RouteOptions.instance?: 'required' | 'optional'` (default: not resolved). The router reads `x-dash-instance`, loads the instance, checks it belongs to this module and that the caller owns its page or the page is shared (the pages API rule; admins get no extra access), and sets `req.instance: ModuleInstance<unknown> | null`. Required with a missing, unknown, foreign-module or not-visible instance answers 404 `not_found` (identical response, no existence leak). Optional and absent gives null; optional and present but not visible is 404. `RouteRequest.instance` is `ModuleInstance<unknown>` (not generic, to keep `ModuleRouter` simple): parse `settings` with the manifest schema. The header is removed from `req.headers`; `req.instance` is the only way to see it. Raw root mounts always get `instance: null`.
+- Kit: `createMockRouter(server, host, { canView? })`; `router.call(..., { instance })` (an id or a `ModuleInstance`) must be one of `host.setInstances(...)` and visible (default: `ownerId === user.id`), else 404 on routes that declare `instance`. New server suite case "instance-scoped routes need a visible instance". `MockRouter.routes` lists each route's `instance` option.
+- Affected: hand-built `TileProps`/`DetailProps`/`SettingsProps` (tests) need `instanceId`; `RouteRequest` built by hand needs `instance`.
+- Migration: declare `instance: 'required'` on routes that act for an instance and read `req.instance`; never take an instance id from the query or body.
+
+### F2. `host.users()` returns `timeZone` and `role`
+- Problem: modules had no per-user time zone and could not tell admins from members on the server (local-midnight summaries, due-date buckets, greetings).
+- Change: `users()` entries are `{ id, name, handle, role: 'admin' | 'member', timeZone }`. `timeZone` is the IANA zone saved in the user's prefs, `UTC` if unset or unreadable. The mock host defaults to `member` and `UTC`; `setUsers` takes optional `role` and `timeZone`. Modules compute per-user local dates on the server from `host.users()`.
+
+### F3. Owners on request events
+- `todo.create.request` gains optional `ownerId` (string or null; null = household) and optional `visibility` (`private` | `shared`; absent = the list's default). `item.readLater` gains optional `userId` (the publishing user; null or absent = unknown, receivers fall back to all admins).
+- Kept optional (nullable) rather than required-nullable: the bus validates payloads against these schemas at publish time and `modules/calendar` publishes `todo.create.request` without the fields yet; required fields would reject them and fail typecheck. Make them required once every publisher sends them.
+
 ## Open, not changed (found while finishing Clock and writing the end-to-end test)
 
 Nothing below changes `CONTRACT_VERSION`; each is recorded so the next module author is not surprised.

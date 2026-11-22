@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DashError } from '@dash/contract';
 import { createSnapshotPusher, defineServer, newId, type SnapshotPusher } from '@dash/module-kit';
 import manifest from '../manifest.js';
 
@@ -51,6 +52,13 @@ function createServer() {
           'SELECT id, label FROM __TABLE_PREFIX__items ORDER BY created_at DESC, id DESC LIMIT 100',
         ),
       );
+      // Instance-scoped: the shell sends the tile's instance id as `x-dash-instance`; the server checks the caller may see that
+      // instance's page and answers 404 otherwise. Never take an instance id from the query or body. `req.instance` is typed
+      // nullable (null only without the option), so guard it; its `settings` are the stored value: parse them with the manifest schema.
+      r.get('/instance', { level: 'view', instance: 'required' }, (req) => {
+        if (!req.instance) throw new DashError('not_found', 'Not found');
+        return { instanceId: req.instance.id, settings: manifest.settings.parse(req.instance.settings) };
+      });
       r.post('/items', { level: 'edit', body: NewItem }, (req) => {
         const id = newId(host.now()); // uuid v7, time-ordered; time comes from host.now()
         host.store.db.run(

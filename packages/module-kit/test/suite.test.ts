@@ -14,6 +14,7 @@ const CASE_NAMES = [
   'migrations only touch own tables',
   'every route declares a level',
   'view level cannot call edit routes',
+  'instance-scoped routes need a visible instance',
   'job survives bad upstream',
   'job publishes only declared events',
   'snapshots contain no secrets',
@@ -29,7 +30,7 @@ describe('server contract suite: good sample', () => {
 });
 
 describe('server contract suite: bad sample', () => {
-  test('exposes the ten cases in order', () => {
+  test('exposes the eleven cases in order', () => {
     expect(serverContractCases(goodServer, { moduleDir: goodDir }).map((c) => c.name)).toEqual(CASE_NAMES);
   });
 

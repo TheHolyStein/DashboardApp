@@ -41,6 +41,7 @@ function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps
     locale: 'en',
     timeZone: 'UTC',
     isOwner: true,
+    instanceId: 'i1',
     openDetail: () => undefined,
     ...over,
   };
@@ -300,6 +301,7 @@ describe('Detail', () => {
     locale: 'en',
     timeZone: 'UTC',
     isOwner: true,
+    instanceId: 'i1',
     params: {},
     close: () => undefined,
     ...over,

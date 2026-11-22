@@ -80,7 +80,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   app.get('/api/health', () => ({ ok: true, version: SERVER_VERSION, contract: CONTRACT_VERSION }));
 
-  for (const mod of deps.modules) mountModule(app, mod, deps.auth);
+  for (const mod of deps.modules) mountModule(app, mod, deps.auth, deps.db);
 
   if (deps.stream && deps.scheduler) {
     registerStreamRoutes(app, { stream: deps.stream, scheduler: deps.scheduler, auth: deps.auth });

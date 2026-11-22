@@ -37,6 +37,7 @@ export const goodServer = defineServer({
       const { title } = req.body;
       return Promise.resolve(host.store.db.run('INSERT INTO m_sample_items (title) VALUES (?)', [title]));
     });
+    r.get('/detail', { level: 'view', instance: 'required' }, (req) => Promise.resolve({ id: req.instance?.id }));
     r.post('/read', { level: 'view' }, () => Promise.resolve({ ok: true }));
     r.get('/boom', { level: 'view' }, () => Promise.reject(new DashError('not_found', 'nothing here')));
     r.get('/crash', { level: 'view' }, () => Promise.reject(new Error('unexpected')));

@@ -16,6 +16,14 @@ describe('items routes', () => {
     expect(host.pushed).toEqual([{ instanceId: null, data: { value: 1, label: 'First' } }]);
   });
 
+  it('the instance route needs an instance the caller may see', async () => {
+    const { host, router } = await setup();
+    host.setInstances([{ id: 'i1', ownerId: 'u1', pageId: 'p1', settings: {} }, { id: 'i2', ownerId: 'u2', pageId: 'p2', settings: {} }]);
+    expect((await router.call('GET', '/instance', { level: 'view', instance: 'i1' })).body).toEqual({ instanceId: 'i1', settings: {} });
+    expect((await router.call('GET', '/instance', { level: 'view', instance: 'i2' })).status).toBe(404);
+    expect((await router.call('GET', '/instance', { level: 'view' })).status).toBe(404);
+  });
+
   it('rejects an invalid body with 422 and a viewer with 403', async () => {
     const { router } = await setup();
     expect((await router.call('POST', '/items', { level: 'edit', body: { label: '' } })).status).toBe(422);

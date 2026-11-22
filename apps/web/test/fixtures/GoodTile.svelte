@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { TileProps } from '@dash/contract';
-  let { data, level, size, mode, settings, openDetail, locale, timeZone, isOwner }: TileProps<{ text?: string }, { label?: string }> = $props();
+  let { data, level, size, mode, settings, openDetail, locale, timeZone, isOwner, api, instanceId }: TileProps<{ text?: string }, { label?: string }> = $props();
 </script>
 
 <div data-testid="good">
@@ -16,4 +16,6 @@
   <button type="button" data-testid="noop">noop</button>
   <span data-no-open data-testid="no-open">keep</span>
   <span data-testid="plain-area">plain</span>
+  <span data-testid="instance-id">{instanceId}</span>
+  <button type="button" data-testid="ping" onclick={() => void api.get("/ping")}>ping</button>
 </div>

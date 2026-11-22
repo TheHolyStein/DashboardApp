@@ -78,6 +78,24 @@ describe('api', () => {
     expect(url).toBe('/api/m/xx/a?q=1');
   });
 
+  it('moduleApi bound to an instance sends x-dash-instance on every method; unbound sends none', async () => {
+    signIn({ csrf: 'tok' });
+    const seen: Array<string | null> = [];
+    const h = ({ request }: { request: Request }) => {
+      seen.push(request.headers.get('x-dash-instance'));
+      return HttpResponse.json({ ok: true });
+    };
+    server.use(http.get('/api/m/xx/a', h), http.post('/api/m/xx/a', h), http.put('/api/m/xx/a', h), http.patch('/api/m/xx/a', h), http.delete('/api/m/xx/a', h));
+    const bound = moduleApi('xx', 'inst-1');
+    await bound.get('/a');
+    await bound.post('/a', {});
+    await bound.put('/a', {});
+    await bound.patch('/a', {});
+    await bound.delete('/a');
+    await moduleApi('xx').get('/a');
+    expect(seen).toEqual(['inst-1', 'inst-1', 'inst-1', 'inst-1', 'inst-1', null]);
+  });
+
   it('401 anywhere returns to login', async () => {
     server.use(http.get('/api/me', () => HttpResponse.json(makeMe())), http.get('/api/pages', () => errorResponse('unauthenticated', 401)));
     await session.refresh();

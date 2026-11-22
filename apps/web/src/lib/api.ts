@@ -1,4 +1,4 @@
-import { DashError, ErrorDto, ID_RE, type ErrorCode, type ModuleApi, type ModuleId } from '@dash/contract';
+import { DashError, ErrorDto, ID_RE, type ErrorCode, type InstanceId, type ModuleApi, type ModuleId } from '@dash/contract';
 import type { z } from 'zod';
 
 interface ApiHooks {
@@ -15,8 +15,8 @@ export function configureApi(h: ApiHooks): void {
 
 const CODES: readonly string[] = ['unauthenticated', 'forbidden', 'not_found', 'conflict', 'invalid', 'rate_limited', 'upstream', 'internal'];
 
-async function request<T>(method: string, path: string, body?: unknown, schema?: z.ZodType<T>): Promise<T> {
-  const headers: Record<string, string> = {};
+async function request<T>(method: string, path: string, body?: unknown, schema?: z.ZodType<T>, extra?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { ...extra };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') {
     const csrf = hooks.getCsrf();
@@ -88,20 +88,22 @@ function checkModulePath(moduleId: string, path: string): string {
   return path;
 }
 
-export function moduleApi(moduleId: ModuleId): ModuleApi {
+/** With `instanceId`, every call carries `x-dash-instance: <instanceId>` (the server resolves it for routes declared with `instance`). */
+export function moduleApi(moduleId: ModuleId, instanceId?: InstanceId): ModuleApi {
   if (!ID_RE.test(moduleId)) throw new DashError('invalid', `Invalid module id: ${moduleId}`);
   const base = `/m/${moduleId}`;
+  const extra = instanceId === undefined ? undefined : { 'x-dash-instance': instanceId };
   // Validation failures reject the returned promise; no request is made.
   const guard = async <T>(path: string, run: (full: string) => Promise<T>): Promise<T> =>
     run(`${base}${checkModulePath(moduleId, path)}`);
   return {
     get: <T>(path: string, query?: Record<string, string | number | boolean>) => {
       const qs = query ? new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)])).toString() : '';
-      return guard(path, (full) => api.get<T>(`${full}${qs ? `?${qs}` : ''}`));
+      return guard(path, (full) => request<T>('GET', `${full}${qs ? `?${qs}` : ''}`, undefined, undefined, extra));
     },
-    post: <T>(path: string, body?: unknown) => guard(path, (full) => api.post<T>(full, body)),
-    put: <T>(path: string, body?: unknown) => guard(path, (full) => api.put<T>(full, body)),
-    patch: <T>(path: string, body?: unknown) => guard(path, (full) => api.patch<T>(full, body)),
-    delete: <T>(path: string) => guard(path, (full) => api.delete<T>(full)),
+    post: <T>(path: string, body?: unknown) => guard(path, (full) => request<T>('POST', full, body, undefined, extra)),
+    put: <T>(path: string, body?: unknown) => guard(path, (full) => request<T>('PUT', full, body, undefined, extra)),
+    patch: <T>(path: string, body?: unknown) => guard(path, (full) => request<T>('PATCH', full, body, undefined, extra)),
+    delete: <T>(path: string) => guard(path, (full) => request<T>('DELETE', full, undefined, undefined, extra)),
   };
 }

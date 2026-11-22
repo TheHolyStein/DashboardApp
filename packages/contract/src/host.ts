@@ -98,7 +98,8 @@ export interface HostServices {
   notify(n: Notification): void;
   config<C>(): Promise<C>;                                  // module-wide admin config, validated
   instances<S>(): Promise<ModuleInstance<S>[]>;             // all placed instances of this module
-  users(): Promise<Array<{ id: UserId; name: string; handle: string }>>; // handle = @mention name
+  /** handle = @mention name; timeZone = the user's saved IANA zone (UTC if unset), for per-user local dates on the server. */
+  users(): Promise<Array<{ id: UserId; name: string; handle: string; role: 'admin' | 'member'; timeZone: string }>>;
   log: {
     debug(msg: string, f?: object): void;
     info(msg: string, f?: object): void;

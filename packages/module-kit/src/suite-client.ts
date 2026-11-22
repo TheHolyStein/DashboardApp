@@ -85,6 +85,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     locale: SUITE_LOCALE,
     timeZone: SUITE_TIME_ZONE,
     isOwner: true,
+    instanceId: 'suite-instance',
     openDetail: () => undefined,
     ...over,
   });
@@ -100,6 +101,7 @@ export function clientContractCases(client: ModuleClient, opts: ClientSuiteOptio
     locale: SUITE_LOCALE,
     timeZone: SUITE_TIME_ZONE,
     isOwner: true,
+    instanceId: 'suite-instance',
     params: {},
     close: () => undefined,
     ...over,

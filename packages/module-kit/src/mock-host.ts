@@ -36,7 +36,8 @@ export interface MockHost extends HostServices {
   advance(ms: number): void;
   setConfig(c: unknown): void;
   setInstances(list: ModuleInstance[]): void;
-  setUsers(u: Array<{ id: string; name: string; handle: string }>): void;
+  /** `role` defaults to `member`, `timeZone` to `UTC`. */
+  setUsers(u: Array<{ id: string; name: string; handle: string; role?: 'admin' | 'member'; timeZone?: string }>): void;
 }
 
 interface Rule {
@@ -77,7 +78,7 @@ export function createMockHost(manifest: ModuleManifest, opts: { now?: Date } = 
   let nowMs = (opts.now ?? new Date('2026-01-01T12:00:00.000Z')).getTime();
   let config: unknown = {};
   let instances: ModuleInstance[] = [];
-  let users: Array<{ id: string; name: string; handle: string }> = [];
+  let users: Awaited<ReturnType<HostServices['users']>> = [];
   const rules: Rule[] = [];
   const hanging = new Set<(e: DashError) => void>();
   const kv = new Map<string, unknown>();
@@ -190,7 +191,7 @@ export function createMockHost(manifest: ModuleManifest, opts: { now?: Date } = 
       instances = list;
     },
     setUsers: (u) => {
-      users = u;
+      users = u.map((x) => ({ role: 'member' as const, timeZone: 'UTC', ...x }));
     },
   };
   sqliteOf.set(host, sqlite);
@@ -235,9 +236,16 @@ export interface MockRouter {
   call(
     method: string,
     path: string,
-    req: { level: Level; body?: unknown; query?: unknown; user?: Partial<RouteRequest['user']> },
+    req: {
+      level: Level;
+      body?: unknown;
+      query?: unknown;
+      user?: Partial<RouteRequest['user']>;
+      /** Stands for the `x-dash-instance` header. Must be one of the host's instances (`host.setInstances`) and visible to the caller, else 404 on routes that declare `instance`. */
+      instance?: ModuleInstance | InstanceId;
+    },
   ): Promise<{ status: number; body: unknown }>;
-  routes: Array<{ method: string; path: string; level: Level }>;
+  routes: Array<{ method: string; path: string; level: Level; instance?: 'required' | 'optional' }>;
 }
 
 function errorBody(code: string, message: string, details?: unknown): { error: { code: string; message: string; details?: unknown } } {
@@ -258,7 +266,13 @@ function matchPath(template: string, actual: string): Record<string, string> | n
   return params;
 }
 
-export function createMockRouter(server: ModuleServer, host: MockHost): MockRouter {
+export interface MockRouterOptions {
+  /** Whether the caller may view the page holding `instance`. Default: the caller owns it (`instance.ownerId === user.id`). */
+  canView?: (instance: ModuleInstance, user: RouteRequest['user']) => boolean;
+}
+
+export function createMockRouter(server: ModuleServer, host: MockHost, mockOpts: MockRouterOptions = {}): MockRouter {
+  const canView = mockOpts.canView ?? ((i, u) => i.ownerId === u.id);
   const registered: RegisteredRoute[] = [];
   const add =
     (method: string) =>
@@ -276,7 +290,7 @@ export function createMockRouter(server: ModuleServer, host: MockHost): MockRout
   server.routes?.(router, host);
 
   return {
-    routes: registered.map(({ method, path, level }) => ({ method, path, level })),
+    routes: registered.map(({ method, path, level, opts }) => ({ method, path, level, ...(opts.instance ? { instance: opts.instance } : {}) })),
     async call(method, path, req) {
       const verb = method.toUpperCase();
       let route: RegisteredRoute | undefined;
@@ -306,8 +320,22 @@ export function createMockRouter(server: ModuleServer, host: MockHost): MockRout
         if (!parsed.success) return { status: 422, body: errorBody('invalid', 'invalid query', parsed.error.issues) };
         query = parsed.data;
       }
+      const user = { id: 'u1', name: 'Test', role: 'member' as const, ...req.user };
+      let instance: ModuleInstance | null = null;
+      if (route.opts.instance) {
+        const sent = req.instance === undefined ? undefined : typeof req.instance === 'string' ? req.instance : req.instance.id;
+        if (sent === undefined) {
+          if (route.opts.instance === 'required') return { status: 404, body: errorBody('not_found', 'Not found') };
+        } else {
+          // like the server: must belong to this module (the host's instances) and be visible to the caller
+          const found = (await host.instances()).find((i) => i.id === sent);
+          if (!found || !canView(found, user)) return { status: 404, body: errorBody('not_found', 'Not found') };
+          instance = found;
+        }
+      }
       const request: RouteRequest<unknown, unknown> = {
-        user: { id: 'u1', name: 'Test', role: 'member', ...req.user },
+        user,
+        instance,
         level: req.level,
         params,
         query,

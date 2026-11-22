@@ -216,6 +216,58 @@ describe('module router', () => {
   });
 });
 
+describe('instance-scoped routes', () => {
+  const inst = serverFor('inst', (r) => {
+    r.get('/req', { level: 'view', instance: 'required' }, (req) => ({ id: req.instance?.id, s: req.instance?.settings, h: req.headers['x-dash-instance'] ?? null }));
+    r.get('/opt', { level: 'view', instance: 'optional' }, (req) => ({ id: req.instance?.id ?? null }));
+    r.get('/none', { level: 'view' }, (req) => ({ i: req.instance ?? null }));
+  });
+  async function setup(): Promise<ModuleEnv> {
+    const e = await env([inst, serverFor('other')]);
+    e.db.exec(`
+      INSERT INTO pages (id, owner_id, name, shared) VALUES ('pa', 'alice', 'A', 0), ('ps', 'alice', 'S', 1);
+      INSERT INTO instances (id, module_id, page_id, settings) VALUES
+        ('i-own', 'inst', 'pa', '{"city":"x"}'), ('i-shared', 'inst', 'ps', '{}'), ('i-other', 'other', 'ps', '{}');`);
+    return e;
+  }
+  const get = (e: ModuleEnv, url: string, user: string, instance?: string) =>
+    e.app.inject({ url, headers: { ...as(user), ...(instance ? { 'x-dash-instance': instance } : {}) } });
+
+  it('required: own page ok, with settings, and the raw header is not passed on', async () => {
+    const e = await setup();
+    const res = await get(e, '/api/m/inst/req', 'alice', 'i-own');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ id: 'i-own', s: { city: 'x' }, h: null });
+  });
+  it('required: page shared with the caller ok; unshared page 404', async () => {
+    const e = await setup();
+    expect((await get(e, '/api/m/inst/req', 'bob', 'i-shared')).statusCode).toBe(200);
+    const denied = await get(e, '/api/m/inst/req', 'bob', 'i-own');
+    expect(denied.statusCode).toBe(404);
+    expect(errOf(denied).error.code).toBe('not_found');
+  });
+  it('required: instance of another module, unknown id and missing header all 404 alike', async () => {
+    const e = await setup();
+    const bodies: string[] = [];
+    for (const id of ['i-other', 'nope', undefined]) {
+      const res = await get(e, '/api/m/inst/req', 'alice', id);
+      expect(res.statusCode).toBe(404);
+      bodies.push(res.body);
+    }
+    expect(new Set(bodies).size).toBe(1);
+  });
+  it('optional: absent gives null, present and visible resolves, present and hidden 404', async () => {
+    const e = await setup();
+    expect((await get(e, '/api/m/inst/opt', 'bob')).json()).toEqual({ id: null });
+    expect((await get(e, '/api/m/inst/opt', 'bob', 'i-shared')).json()).toEqual({ id: 'i-shared' });
+    expect((await get(e, '/api/m/inst/opt', 'bob', 'i-own')).statusCode).toBe(404);
+  });
+  it('routes without the option get null', async () => {
+    const e = await setup();
+    expect((await get(e, '/api/m/inst/none', 'alice', 'i-own')).json()).toEqual({ i: null });
+  });
+});
+
 describe('raw root mounts', () => {
   const calendar = (auth: 'appPassword' | 'session') =>
     serverFor(
@@ -370,9 +422,14 @@ describe('host', () => {
     expect(await host.config()).toEqual({});
     expect(await host.instances()).toEqual([]);
     expect(await host.users()).toEqual([
-      { id: 'alice', name: 'Alice', handle: 'alice' },
-      { id: 'bob', name: 'Bob', handle: 'bob' },
+      { id: 'alice', name: 'Alice', handle: 'alice', role: 'member', timeZone: 'UTC' },
+      { id: 'bob', name: 'Bob', handle: 'bob', role: 'member', timeZone: 'UTC' },
     ]);
+    // the stored user preference wins; a user without one (or an unreadable value) is UTC
+    e.db.exec(`INSERT INTO users (id, name, handle, role, password_hash, prefs, created_at) VALUES
+      ('alice', 'Alice', 'alice', 'member', 'x', '{"timeZone":"Asia/Kolkata"}', 't'),
+      ('bob', 'Bob', 'bob', 'member', 'x', 'not json', 't')`);
+    expect((await host.users()).map((u) => u.timeZone)).toEqual(['Asia/Kolkata', 'UTC']);
     expect(host.notifications).toBeUndefined();
     expect(host.now().toISOString()).toBe('2026-11-12T10:00:00.000Z');
     expect(() => host.log.info('hi', { a: 1 })).not.toThrow();

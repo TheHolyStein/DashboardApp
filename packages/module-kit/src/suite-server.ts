@@ -36,15 +36,16 @@ function modulePrefix(id: string): string {
 /** Table (and index/trigger/view) names a migration touches, from the DDL/DML statements it contains. */
 export function migrationTargets(sql: string): string[] {
   const clean = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-  const id = String.raw`[\s]*["'\`\[]?([A-Za-z_][\w]*)`;
+  // Keywords match as whole words (`updated_at` is not `UPDATE d_at`, `online` is not `ON line`); the name follows after whitespace or a quote.
+  const id = String.raw`(?:\s+|\s*(?=["'\`\[]))["'\`\[]?([A-Za-z_]\w*)`;
   const patterns = [
-    String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER|VIRTUAL\s+TABLE)(?:\s+IF\s+NOT\s+EXISTS)?` + id,
-    String.raw`\bALTER\s+TABLE` + id,
-    String.raw`\bDROP\s+(?:TABLE|INDEX|VIEW|TRIGGER)(?:\s+IF\s+EXISTS)?` + id,
-    String.raw`\bINSERT\s+(?:OR\s+\w+\s+)?INTO` + id,
-    String.raw`\bUPDATE(?:\s+OR\s+\w+)?` + id,
-    String.raw`\bDELETE\s+FROM` + id,
-    String.raw`\bON` + id, // CREATE INDEX ... ON <table>, triggers
+    String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER|VIRTUAL\s+TABLE)\b(?:\s+IF\s+NOT\s+EXISTS\b)?` + id,
+    String.raw`\bALTER\s+TABLE\b` + id,
+    String.raw`\bDROP\s+(?:TABLE|INDEX|VIEW|TRIGGER)\b(?:\s+IF\s+EXISTS\b)?` + id,
+    String.raw`\bINSERT\s+(?:OR\s+\w+\s+)?INTO\b` + id,
+    String.raw`\bUPDATE\b(?:\s+OR\s+\w+\b)?` + id,
+    String.raw`\bDELETE\s+FROM\b` + id,
+    String.raw`\bON\b` + id, // CREATE INDEX ... ON <table>, triggers
   ];
   const out: string[] = [];
   for (const p of patterns) {
@@ -195,6 +196,25 @@ export function serverContractCases(server: ModuleServer, opts: ServerSuiteOptio
           if (!mustBeDenied) continue;
           const res = await router.call(r.method, r.path, { level: 'view' });
           if (res.status !== 403) problems.push(`${routeKey(r)} returned ${res.status} for level view, expected 403`);
+        }
+        if (problems.length > 0) fail(problems.join('; '));
+      },
+    },
+    {
+      name: 'instance-scoped routes need a visible instance',
+      run: async () => {
+        const host = await freshHost(server);
+        host.setInstances([{ id: 'i-foreign', ownerId: 'someone-else', pageId: 'p-foreign', settings: {} }]);
+        const router = createMockRouter(server, host);
+        const problems: string[] = [];
+        for (const r of router.routes.filter((x) => x.instance !== undefined)) {
+          const path = r.path.replace(/:[A-Za-z_]\w*/g, 'x');
+          const hidden = await router.call(r.method, path, { level: 'edit', instance: 'i-foreign' });
+          if (hidden.status !== 404) problems.push(`${routeKey(r)} answered ${hidden.status} for an instance on a page the caller cannot see, expected 404`);
+          if (r.instance === 'required') {
+            const none = await router.call(r.method, path, { level: 'edit' });
+            if (none.status !== 404) problems.push(`${routeKey(r)} answered ${none.status} without an instance, expected 404`);
+          }
         }
         if (problems.length > 0) fail(problems.join('; '));
       },

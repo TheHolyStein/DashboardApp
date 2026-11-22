@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- module components are generic over arbitrary data and settings */
 import type { Component } from 'svelte';
-import type { Mode, TileSize } from './ids.js';
+import type { InstanceId, Mode, TileSize } from './ids.js';
 import type { ModuleManifest } from './manifest.js';
 
-// Bound to /api/m/<id>/, adds CSRF header, throws DashError
+// Bound to /api/m/<id>/ and, for a mounted tile/detail/settings, to its instance (sends `x-dash-instance` on every call;
+// routes declared with `instance: 'required'` read it as `req.instance`). Adds CSRF header, throws DashError.
 export interface ModuleApi {
   get<T>(path: string, query?: Record<string, string | number | boolean>): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
@@ -19,6 +20,8 @@ export interface TileProps<D = unknown, S = unknown> {
   updatedAt: string | null;
   stale: boolean;
   settings: S;
+  /** This instance's id; the `api` already sends it as `x-dash-instance`. */
+  instanceId: InstanceId;
   level: 'view' | 'edit';
   size: TileSize;
   mode: Mode;
@@ -42,6 +45,7 @@ export interface DetailProps<D = unknown, S = unknown> extends Omit<TileProps<D,
 }
 
 export interface SettingsProps<S = unknown> {
+  instanceId: InstanceId;
   value: S;
   onChange: (v: S) => void;
   api: ModuleApi;

@@ -22,6 +22,12 @@ export interface RouteRequest<B = unknown, Q = unknown> {
   query: Q;
   body: B;
   headers: Record<string, string>;
+  /**
+   * The instance named by the client's `x-dash-instance` header, resolved and access-checked by the server when the
+   * route declares `instance: 'required' | 'optional'`; otherwise null. Its `settings` are the stored (unparsed)
+   * value: parse them with `manifest.settings`. Typed `unknown` rather than generic to keep `ModuleRouter` simple.
+   */
+  instance: ModuleInstance<unknown> | null;
   raw: unknown;
 }
 
@@ -30,6 +36,14 @@ export interface RouteOptions<B = unknown, Q = unknown> {
   /** Validated by the server (422 on failure); `req.body` is then `z.infer` of it. */
   body?: z.ZodType<B>;
   query?: z.ZodType<Q>;
+  /**
+   * Resolve the instance the client sent in `x-dash-instance` into `req.instance`. The instance must belong to this
+   * module and sit on a page the caller may view (owner, or a page shared with them; admins get no extra access).
+   * `'required'`: missing, invalid, foreign or not visible answers 404 `not_found` (same response for all).
+   * `'optional'`: absent gives null; present but not visible is still 404. Default: not resolved (null).
+   * Never take an instance id from the query or body for access decisions; the raw header is not passed to handlers.
+   */
+  instance?: 'required' | 'optional';
 }
 
 /** May return a value or a promise of one (`unknown` already covers `Promise<unknown>`). */

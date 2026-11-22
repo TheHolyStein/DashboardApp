@@ -163,7 +163,7 @@
       >
         {#if phase === 'custom' && custom}
           {@const Custom = custom}
-          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} api={moduleApi(instance.moduleId)} {t} {isOwner} {...userFormat()} />
+          <Custom value={customValue} onChange={(v: unknown) => (customValue = v)} instanceId={instance.id} api={moduleApi(instance.moduleId, instance.id)} {t} {isOwner} {...userFormat()} />
         {:else}
           <SchemaForm {fields} value={form} {errors} onChange={(v) => (form = v)} {t} moduleId={instance.moduleId} {secretsSet} />
         {/if}

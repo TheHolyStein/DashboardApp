@@ -47,7 +47,7 @@ modules/<id>/
 2. Record fixtures: save real upstream responses once (by hand or a throwaway script outside the repo), strip personal data and keys, commit under `fixtures/`. Tests use only these.
 3. Pure logic first, test-first: parsers and mappers from fixture → your snapshot type. No host needed.
 4. Jobs: fetch through `host.http`, map, `host.push`, publish events. Test with `createMockHost`.
-5. Routes with levels. Test with `createMockRouter`.
+5. Routes with levels. Test with `createMockRouter`. Instance-scoped routes: declare `instance: 'required'`; never take an instance id from the query or body. (`req.instance` carries the checked instance and its stored settings; in tests pass `{ instance }` to `router.call` after `host.setInstances`.)
 6. `Tile.svelte`, then `Detail.svelte`, from `fixtures/tile.json` / `detail.json`, using only `@dash/ui` primitives and `--db-*` tokens.
 7. Run both contract suites, `pnpm --filter @dash/module-<id> test`, then `pnpm check`.
 8. Manual look: `pnpm dev`, place the tile, check day/night, min and max size, phone width, stale state (stop the network), view-only user.

@@ -60,7 +60,8 @@ export function baseProps(instance: Instance, mode: Mode, isOwner: boolean) {
     level: grantLevel(session.me?.grants, instance.moduleId) === 'edit' ? ('edit' as const) : ('view' as const),
     mode,
     isOwner,
-    api: moduleApi(instance.moduleId),
+    instanceId: instance.id,
+    api: moduleApi(instance.moduleId, instance.id),
     t,
     ...userFormat(),
   };

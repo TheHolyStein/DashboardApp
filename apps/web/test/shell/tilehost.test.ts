@@ -7,6 +7,8 @@ import { pages } from '../../src/lib/pages.svelte.js';
 import { createTicker, TICK_MS } from '../../src/lib/ticker.svelte.js';
 import { THEME_KEY, type HostRegistry, type ThemeSeam } from '../../src/lib/host.js';
 import TileHost from '../../src/shell/TileHost.svelte';
+import { http, HttpResponse } from 'msw';
+import { server } from '../setup.js';
 import { control } from '../fixtures/control.js';
 import OverrideTile from '../fixtures/OverrideTile.svelte';
 import { client, fakeRegistry } from '../fixtures/registry.js';
@@ -52,6 +54,21 @@ describe('TileHost', () => {
     own.unmount();
     render(TileHost, { props: { instance: good, page: page('p1', [good], { ownerId: 'u2', shared: true }), modules } });
     expect((await screen.findByTestId('owner')).textContent).toBe('false');
+  });
+
+  it('hands the tile its instanceId and an api that sends it as x-dash-instance', async () => {
+    const { modules } = fakeRegistry();
+    const seen: Array<string | null> = [];
+    server.use(
+      http.get('/api/m/good/ping', ({ request }) => {
+        seen.push(request.headers.get('x-dash-instance'));
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    renderHost(good, modules);
+    expect((await screen.findByTestId('instance-id')).textContent).toBe('i1');
+    await fireEvent.click(screen.getByTestId('ping'));
+    await waitFor(() => expect(seen).toEqual(['i1']));
   });
 
   it('tile that throws shows failure placeholder and others still render', async () => {

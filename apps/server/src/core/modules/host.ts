@@ -19,6 +19,26 @@ import type {
   StoreFactory,
 } from './deps.js';
 
+/** Saved IANA time zone per user id (from `users.prefs`); missing, unreadable or absent table gives no entry (callers use UTC). */
+function userTimeZones(db: BetterSqlite3.Database): Map<string, string> {
+  const out = new Map<string, string>();
+  let rows: Array<{ id: string; prefs: string }>;
+  try {
+    rows = db.prepare('SELECT id, prefs FROM users').all() as Array<{ id: string; prefs: string }>;
+  } catch {
+    return out;
+  }
+  for (const r of rows) {
+    try {
+      const tz = (JSON.parse(r.prefs) as { timeZone?: unknown }).timeZone;
+      if (typeof tz === 'string' && tz !== '') out.set(r.id, tz);
+    } catch {
+      /* unreadable prefs: UTC */
+    }
+  }
+  return out;
+}
+
 export interface HostDeps {
   manifest: ModuleManifest;
   db: BetterSqlite3.Database;
@@ -57,7 +77,14 @@ export function createHost(moduleId: ModuleId, deps: HostDeps): HostServices {
     async instances<S>(): Promise<ModuleInstance<S>[]> {
       return (await deps.state.instances(moduleId)) as ModuleInstance<S>[];
     },
-    users: () => Promise.resolve(deps.auth.listUsers().map((u) => ({ id: u.id, name: u.name, handle: u.handle }))),
+    users: () => {
+      const zones = userTimeZones(deps.db);
+      return Promise.resolve(
+        deps.auth.listUsers().map((u) => ({
+          id: u.id, name: u.name, handle: u.handle, role: u.role, timeZone: zones.get(u.id) ?? 'UTC',
+        })),
+      );
+    },
     log: {
       debug: (msg, f) => log.debug(f ?? {}, msg),
       info: (msg, f) => log.info(f ?? {}, msg),

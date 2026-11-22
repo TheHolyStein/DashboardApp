@@ -21,7 +21,11 @@ export const events = {
   'notification.created':     z.object({ id: z.string(), userId: z.string(), moduleId: z.string(), level: z.enum(['info','warn','critical']),
                                 title: z.string(), createdAt: z.string() }),   // published by core only
   'todo.create.request':      z.object({ sourceKey: z.string(), list: TodoList, title: z.string(), due: z.string().nullable(),
-                                assigneeId: z.string().nullable(), icon: z.string().nullable(), url: z.string().nullable() }),
+                                assigneeId: z.string().nullable(), icon: z.string().nullable(), url: z.string().nullable(),
+                                /** The user the item belongs to; null = household. Optional until publishers send it. */
+                                ownerId: z.string().nullable().optional(),
+                                /** Absent = the list's default. */
+                                visibility: z.enum(['private','shared']).optional() }),
   'todo.remove.request':      z.object({ sourceKey: z.string() }),
   'todo.changed':             z.object({ itemId: z.string(), kind: z.enum(['created','updated','done','deleted']) }),
   'wled.apply.request':       z.object({ target: z.string(), preset: z.string().optional(), on: z.boolean().optional(),
@@ -34,7 +38,9 @@ export const events = {
   'stock.threshold':          z.object({ symbol: z.string(), price: z.number(), direction: z.enum(['above','below']) }),
   'timer.finished':           z.object({ id: z.string(), label: z.string() }),
   'focus.phase':              z.object({ phase: z.enum(['work','break','idle']) }),
-  'item.readLater':           z.object({ title: z.string(), url: z.string(), source: z.string() }),
+  'item.readLater':           z.object({ title: z.string(), url: z.string(), source: z.string(),
+                                /** The publishing user; null/absent = unknown (receivers fall back to all admins). */
+                                userId: z.string().nullable().optional() }),
   'pin.request':              z.object({ sourceKey: z.string(), title: z.string(), date: z.string(), userIds: z.array(z.string()) }),
   'countdown.request':        z.object({ sourceKey: z.string(), title: z.string(), at: z.string() }),
 } as const;

@@ -596,6 +596,7 @@ export function themeContractCases(theme: ThemeManifest, opts: ThemeSuiteOptions
               updatedAt: '2026-01-01T12:00:00.000Z',
               stale: false,
               settings: {},
+              instanceId: 'suite-instance',
               level: 'edit',
               size: { w: 4, h: 2 },
               mode,

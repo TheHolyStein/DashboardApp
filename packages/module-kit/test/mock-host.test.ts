@@ -91,7 +91,9 @@ describe('mock host', () => {
     host.setUsers([{ id: 'u', name: 'U', handle: 'u' }]);
     host.setInstances([{ id: 'i', ownerId: 'u', pageId: 'p', settings: {} }]);
     expect(await host.config()).toEqual({ a: 1 });
-    expect(await host.users()).toHaveLength(1);
+    expect(await host.users()).toEqual([{ id: 'u', name: 'U', handle: 'u', role: 'member', timeZone: 'UTC' }]);
+    host.setUsers([{ id: 'a', name: 'A', handle: 'a', role: 'admin', timeZone: 'Asia/Kolkata' }]);
+    expect((await host.users())[0]).toMatchObject({ role: 'admin', timeZone: 'Asia/Kolkata' });
     expect(await host.instances()).toHaveLength(1);
   });
 

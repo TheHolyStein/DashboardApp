@@ -1,8 +1,10 @@
 import type { z } from 'zod';
+import type BetterSqlite3 from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BinaryResponse,
   DashError,
+  type ModuleInstance,
   type ModuleRouter,
   type RouteHandler,
   type RouteOptions,
@@ -19,11 +21,13 @@ const WEBDAV_METHODS = [
   'PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'REPORT', 'MKCALENDAR', 'SEARCH',
 ];
 
-/** Request headers for module handlers: never the session cookie; `authorization` only when asked for (appPassword mounts). */
+export const INSTANCE_HEADER = 'x-dash-instance';
+
+/** Request headers for module handlers: never the session cookie; `x-dash-instance` only as `req.instance`; `authorization` only when asked for (appPassword mounts). */
 function headersOf(request: FastifyRequest, withAuthorization = false): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(request.headers)) {
-    if (k === 'cookie' || (k === 'authorization' && !withAuthorization)) continue;
+    if (k === 'cookie' || k === INSTANCE_HEADER || (k === 'authorization' && !withAuthorization)) continue;
     if (v !== undefined) out[k] = Array.isArray(v) ? v.join(', ') : v;
   }
   return out;
@@ -42,6 +46,34 @@ function resolveLevel(auth: AuthSeam, user: SessionUser, mod: LoadedModule): 'vi
   const level = auth.levelFor(user.id, mod.id);
   if (level === 'none') throw new DashError('forbidden', 'No access to this module');
   return level;
+}
+
+/**
+ * The instance in `x-dash-instance`, if it belongs to this module and sits on a page the user owns or that is shared
+ * (the pages API rule; no admin exception). Every failure is the same 404.
+ */
+function resolveInstance(
+  db: BetterSqlite3.Database,
+  request: FastifyRequest,
+  user: SessionUser,
+  mod: LoadedModule,
+  mode: 'required' | 'optional' | undefined,
+): ModuleInstance<unknown> | null {
+  if (mode === undefined) return null;
+  const raw = request.headers[INSTANCE_HEADER];
+  const id = Array.isArray(raw) ? raw[0] : raw;
+  if (id === undefined || id === '') {
+    if (mode === 'optional') return null;
+    throw new DashError('not_found', 'Not found');
+  }
+  const row = db
+    .prepare(
+      `SELECT i.id AS id, i.page_id AS pageId, i.settings AS settings, p.owner_id AS ownerId, p.shared AS shared
+       FROM instances i JOIN pages p ON p.id = i.page_id WHERE i.id = ? AND i.module_id = ?`,
+    )
+    .get(id, mod.id) as { id: string; pageId: string; settings: string; ownerId: string; shared: number } | undefined;
+  if (!row || (row.ownerId !== user.id && row.shared !== 1)) throw new DashError('not_found', 'Not found');
+  return { id: row.id, ownerId: row.ownerId, pageId: row.pageId, settings: JSON.parse(row.settings) as unknown };
 }
 
 function validate<T>(schema: z.ZodType<T> | undefined, value: unknown, where: 'body' | 'query'): T {
@@ -72,9 +104,9 @@ function ensureWebdavMethods(app: FastifyInstance): void {
 /**
  * Mounts a module's routes under /api/m/<id> (nothing for a failed module). Per request, in this order: requireUser (401), module
  * failed/disabled (404), user level none (403), edit route with view level (403), CSRF for non-GET
- * (403), zod validation of query/body (422), handler. Enabled flag and level are read per request.
+ * (403), zod validation of query/body (422), instance (404), handler. Enabled flag and level are read per request.
  */
-export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthSeam): void {
+export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthSeam, db: BetterSqlite3.Database): void {
   if (mod.failed !== undefined) return; // not mounted: /api/m/<id>/* falls through to the global 404
   const base = `/api/m/${mod.id}`;
 
@@ -90,6 +122,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
         requireCsrf(request);
         const query = validate(opts.query, request.query, 'query');
         const body = validate(opts.body, request.body, 'body');
+        const instance = resolveInstance(db, request, user, mod, opts.instance);
         const result = await h({ // sync or async handler
           user: userOf(user),
           level,
@@ -97,6 +130,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
           query,
           body,
           headers: headersOf(request),
+          instance,
           raw: request.raw,
         });
         return sendResult(reply, result);
@@ -139,6 +173,7 @@ export function mountModule(app: FastifyInstance, mod: LoadedModule, auth: AuthS
           query: request.query,
           body: rawBody,
           headers: headersOf(request, mount.auth === 'appPassword'),
+          instance: null,
           raw: request.raw,
           method: request.method,
           path: request.url.split('?')[0] ?? request.url,
