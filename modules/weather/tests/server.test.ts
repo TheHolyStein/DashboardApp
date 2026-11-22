@@ -24,7 +24,7 @@ describe('forecast job', () => {
     expect(host.pushed).toHaveLength(1);
     expect(host.pushed[0]).toMatchObject({
       instanceId: 'i1',
-      data: { instanceId: 'i1', place: 'Berlin', units: 'metric', now: { tempC: 5.4, condition: 'rain' }, air: { aqi: 19, band: 'good' } },
+      data: { place: 'Berlin', units: 'metric', now: { tempC: 5.4, condition: 'rain' }, air: { aqi: 19, band: 'good' } },
     });
   });
 

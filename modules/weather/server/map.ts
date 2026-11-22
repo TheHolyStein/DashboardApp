@@ -123,7 +123,6 @@ function airSummary(air: Air | null): { aqi: number; band: AqiBand } | null {
 }
 
 export interface SnapshotInput {
-  instanceId: string;
   place: string;
   units: 'metric' | 'imperial';
   forecast: Forecast;
@@ -163,7 +162,6 @@ export function mapSnapshot(i: SnapshotInput): ForecastSnapshot {
   }
   const uv = f.daily.uv_index_max[d];
   return {
-    instanceId: i.instanceId,
     place: i.place,
     units: i.units,
     now: {

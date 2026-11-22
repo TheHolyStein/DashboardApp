@@ -23,11 +23,10 @@
 
   // Reload when the instance changes or a fresh snapshot arrives (the server cache keeps this cheap).
   $effect(() => {
-    const id = f?.instanceId;
     void updatedAt;
-    if (!id) return;
+    if (!f) return;
     let live = true;
-    api.get<DetailData>('/detail', { instanceId: id }).then(
+    api.get<DetailData>('/detail').then(
       (d) => {
         if (!live) return;
         detail = d;

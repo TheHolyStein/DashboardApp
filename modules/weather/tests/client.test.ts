@@ -51,6 +51,7 @@ const tileProps = (over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps
   locale: 'en',
   timeZone: 'UTC',
   isOwner: true,
+  instanceId: 'i1',
   openDetail: () => undefined,
   ...over,
 });
@@ -67,6 +68,7 @@ const detailProps = (api: ModuleApi, over: Partial<DetailProps<Snapshot, Setting
   locale: 'en',
   timeZone: 'UTC',
   isOwner: false,
+  instanceId: 'i1',
   params: {},
   close: () => undefined,
   ...over,
@@ -140,7 +142,7 @@ describe('Detail', () => {
     const { api, get } = okApi();
     const el = render(client.Detail, detailProps(api));
     await settle();
-    expect(get).toHaveBeenCalledWith('/detail', { instanceId: forecast.instanceId });
+    expect(get).toHaveBeenCalledWith('/detail');
     expect(el.querySelectorAll('.days li')).toHaveLength(3);
     const rows = [...el.querySelectorAll('.pollen tbody tr')];
     expect(rows.map((r) => r.querySelector('th')?.textContent)).toEqual(['Birch', 'Grass']);
@@ -198,6 +200,7 @@ describe('Settings', () => {
     locale: 'en',
     timeZone: 'UTC',
     isOwner: true,
+    instanceId: 'i1',
     ...over,
   });
 

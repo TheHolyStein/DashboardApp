@@ -53,7 +53,7 @@ describe('GET /geocode', () => {
 describe('GET /detail', () => {
   it('returns hourly, daily, pollen and air data for the instance', async () => {
     const { router } = await routes({ instances: [instance('i1')] });
-    const res = await router.call('GET', '/detail', { level: 'view', query: { instanceId: 'i1' } });
+    const res = await router.call('GET', '/detail', { level: 'view', instance: 'i1' });
     expect(res.status).toBe(200);
     const body = res.body as { place: string; hourly: unknown[]; daily: unknown[]; pollen: { dates: string[] }; air: { aqi: number } };
     expect(body.place).toBe('Berlin');
@@ -66,22 +66,32 @@ describe('GET /detail', () => {
   it('uses the location of the instance and leaves hidden parts out', async () => {
     const paris = instance('i2', { location: PARIS, show: { pollen: false, air: false, uv: false } });
     const { host, router } = await routes({ instances: [paris] });
-    const res = await router.call('GET', '/detail', { level: 'view', query: { instanceId: 'i2' } });
+    const res = await router.call('GET', '/detail', { level: 'view', instance: 'i2' });
     expect(res.body).toMatchObject({ place: 'Paris', pollen: { dates: [], types: [] }, air: null });
     expect(host.requests.every((r) => r.opts?.ttlSec === 1500)).toBe(true);
     expect(host.requests.some((r) => r.url.includes('air-quality'))).toBe(false);
   });
 
-  it('404 for an unknown instance or one that is not set up; 422 without an id', async () => {
+  it('404 for an unknown instance, without an instance, or one that is not set up', async () => {
     const { router } = await routes({ config: {}, instances: [instance('i1')] });
-    expect((await router.call('GET', '/detail', { level: 'view', query: { instanceId: 'nope' } })).status).toBe(404);
-    expect((await router.call('GET', '/detail', { level: 'view', query: { instanceId: 'i1' } })).status).toBe(404);
-    expect((await router.call('GET', '/detail', { level: 'view', query: {} })).status).toBe(422);
+    expect((await router.call('GET', '/detail', { level: 'view', instance: 'nope' })).status).toBe(404);
+    expect((await router.call('GET', '/detail', { level: 'view' })).status).toBe(404);
+    expect((await router.call('GET', '/detail', { level: 'view', instance: 'i1' })).status).toBe(404);
+  });
+
+  it('404 for an instance on a page the caller cannot see, data for their own', async () => {
+    const { host, router } = await routes({ instances: [instance('i1')] }); // owned by u1
+    const other = await router.call('GET', '/detail', { level: 'view', instance: 'i1', user: { id: 'u2' } });
+    expect(other.status).toBe(404);
+    expect(host.requests).toEqual([]);
+    const own = await router.call('GET', '/detail', { level: 'view', instance: 'i1', user: { id: 'u1' } });
+    expect(own.status).toBe(200);
+    expect(own.body).toMatchObject({ place: 'Berlin' });
   });
 
   it('502 when the forecast API is down', async () => {
     const { host, router } = await routes({ instances: [instance('i1')], respond: false });
     host.respond('api.open-meteo.com', new Error('ECONNRESET'));
-    expect((await router.call('GET', '/detail', { level: 'view', query: { instanceId: 'i1' } })).status).toBe(502);
+    expect((await router.call('GET', '/detail', { level: 'view', instance: 'i1' })).status).toBe(502);
   });
 });

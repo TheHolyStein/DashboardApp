@@ -17,7 +17,6 @@ const GeocodeQuery = z.object({
     .max(80)
     .regex(/^[^\p{Cc}]+$/u, 'no control characters'),
 });
-const DetailQuery = z.object({ instanceId: z.string().min(1).max(64) });
 
 /** Two places closer than the ~1 km the requests are rounded to are the same place. */
 const samePlace = (a: Place, b: Place): boolean =>
@@ -107,7 +106,7 @@ function createServer() {
           wantAir ? loadAir(host, signal, place) : Promise.resolve(null),
         ]);
         const now = host.now();
-        const input = { instanceId: instance.id, place: place.name, units: config.units, forecast, air, show: settings.show, pollenTypes: settings.pollenTypes, now };
+        const input = { place: place.name, units: config.units, forecast, air, show: settings.show, pollenTypes: settings.pollenTypes, now };
         s.pusher.push(instance.id, mapSnapshot(input));
 
         if (isHome) {
@@ -142,10 +141,11 @@ function createServer() {
         fetchGeocode(host, new AbortController().signal, req.query.q),
       );
 
-      r.get('/detail', { level: 'view', query: DetailQuery }, async (req): Promise<DetailData> => {
+      // Instance-scoped: the shell sends `x-dash-instance`; the server answers 404 unless the caller may see that tile's page.
+      r.get('/detail', { level: 'view', instance: 'required' }, async (req): Promise<DetailData> => {
         const signal = new AbortController().signal;
-        const instance = (await host.instances<Settings>()).find((i) => i.id === req.query.instanceId);
-        if (!instance) throw new DashError('not_found', 'no such weather tile');
+        const instance = req.instance;
+        if (!instance) throw new DashError('not_found', 'Not found');
         const { settings, place } = await resolve(host, signal, instance);
         if (!place) throw new DashError('not_found', 'weather is not set up');
         const [forecast, air] = await Promise.all([

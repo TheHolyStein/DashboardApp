@@ -15,7 +15,6 @@ const SHOW: Settings['show'] = { pollen: true, air: true, uv: true };
 const ALL = [...POLLEN_TYPES];
 
 const base = (over: Partial<Parameters<typeof mapSnapshot>[0]> = {}): Parameters<typeof mapSnapshot>[0] => ({
-  instanceId: 'i1',
   place: 'Berlin',
   units: 'metric',
   forecast: parseForecast(rawForecast()),
@@ -29,7 +28,6 @@ const base = (over: Partial<Parameters<typeof mapSnapshot>[0]> = {}): Parameters
 describe('mapping', () => {
   it('maps forecast.json to exact snapshot values', () => {
     expect(mapSnapshot(base())).toEqual({
-      instanceId: 'i1',
       place: 'Berlin',
       units: 'metric',
       now: { tempC: 5.4, feelsC: 1.6, condition: 'rain', windKph: 15.1, humidity: 86 },
@@ -41,7 +39,7 @@ describe('mapping', () => {
   });
 
   it('keeps the key order stable so the snapshot pusher can compare JSON', () => {
-    expect(Object.keys(mapSnapshot(base()))).toEqual(['instanceId', 'place', 'units', 'now', 'nextPrecip', 'today', 'pollen', 'air']);
+    expect(Object.keys(mapSnapshot(base()))).toEqual(['place', 'units', 'now', 'nextPrecip', 'today', 'pollen', 'air']);
   });
 
   it('each WMO group maps as specified', () => {

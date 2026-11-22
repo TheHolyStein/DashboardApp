@@ -35,8 +35,8 @@ All values are stored and pushed in metric; `units` only decides how clients dis
 
 - `GET /geocode?q=<2-80 characters>`: up to five places `{ name, lat, lon, detail }`; `q` is only ever one value
   built with `URLSearchParams`.
-- `GET /detail?instanceId=<id>`: hourly 48 h (temperature, precipitation, wind), daily 7 days, pollen level per type and
-  day, AQI with components. The shell does not give the detail pane its instance id, so the snapshot carries `instanceId`.
+- `GET /detail` (instance-scoped: `x-dash-instance`, 404 when the caller cannot see the tile's page): hourly 48 h (temperature, precipitation, wind), daily 7 days, pollen level per type and
+  day, AQI with components. The location comes from the instance's stored settings. The snapshot keeps `units` (the admin's choice) because the client has no admin config.
 
 ## Upstream requests
 

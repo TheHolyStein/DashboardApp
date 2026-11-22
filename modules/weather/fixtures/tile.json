@@ -1,5 +1,4 @@
 {
-  "instanceId": "00000000-0000-7000-8000-000000000001",
   "place": "Berlin",
   "units": "metric",
   "now": { "tempC": 20, "feelsC": 18.5, "condition": "rain", "windKph": 15.1, "humidity": 86 },

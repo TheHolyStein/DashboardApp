@@ -38,8 +38,6 @@ export type AqiBand = 'good' | 'fair' | 'moderate' | 'poor' | 'very-poor';
 
 /** The forecast part of a snapshot. All values metric; times are UTC ISO-8601. */
 export type Forecast = {
-  /** Lets the detail pane ask `GET /detail?instanceId=` (the shell passes no instance id to the pane). */
-  instanceId: string;
   place: string;
   /** How clients display the (metric) numbers: the admin's choice at the time of the last fetch. */
   units: 'metric' | 'imperial';
