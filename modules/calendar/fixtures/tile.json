@@ -1,1 +1,11 @@
-{ "value": 42, "label": "Example" }
+{
+  "date": "2026-01-01",
+  "today": [
+    { "uid": "a@fx", "calendarId": "c1", "recurrenceId": null, "displayTitle": "Dentist", "start": "2026-01-01T15:00:00", "end": "2026-01-01T16:00:00", "startUtc": "2026-01-01T14:00:00.000Z", "endUtc": "2026-01-01T15:00:00.000Z", "allDay": false, "timeZone": "Europe/Berlin", "color": "#3b82f6", "tags": [], "mentions": ["dani"] },
+    { "uid": "b@fx", "calendarId": "c1", "recurrenceId": null, "displayTitle": "Holiday", "start": "2026-01-01", "end": "2026-01-02", "startUtc": "2026-01-01T00:00:00.000Z", "endUtc": "2026-01-02T00:00:00.000Z", "allDay": true, "timeZone": "floating", "color": "#22aa44", "tags": ["outdoor"], "mentions": [] }
+  ],
+  "next": [
+    { "uid": "c@fx", "calendarId": "c1", "recurrenceId": "2026-01-02T08:00:00Z", "displayTitle": "Stand-up", "start": "2026-01-02T09:00:00", "end": "2026-01-02T09:15:00", "startUtc": "2026-01-02T08:00:00.000Z", "endUtc": "2026-01-02T08:15:00.000Z", "allDay": false, "timeZone": "Europe/Berlin", "color": "#3b82f6", "tags": [], "mentions": [] }
+  ],
+  "calendars": [{ "id": "c1", "name": "Personal", "color": "#3b82f6" }]
+}

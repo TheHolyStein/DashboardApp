@@ -143,3 +143,16 @@ describe('event API', () => {
     expect(await events(router, 'u1')).toEqual([]);
   });
 });
+
+describe('POST /events/:uid/delete', () => {
+  it('deletes like DELETE, with the fields in the body', async () => {
+    const { router } = await setup();
+    const cal = await personal(router, 'u1');
+    const ev = await create(router, 'u1', { calendarId: cal, title: 'Stand-up', rrule: 'FREQ=WEEKLY;COUNT=3' });
+    const stale = await router.call('POST', `/events/${ev.uid}/delete`, { ...as('u1'), body: { calendarId: cal, etag: '"0000000000000000"' } });
+    expect(stale.status).toBe(409);
+    const one = await router.call('POST', `/events/${ev.uid}/delete`, { ...as('u1'), body: { calendarId: cal, etag: ev.etag, scope: 'future', occurrenceStart: '2027-01-12T08:00:00Z' } });
+    expect(one.status).toBe(204);
+    expect((await events(router, 'u1')).map((e) => e.start.slice(0, 10))).toEqual(['2027-01-05']);
+  });
+});

@@ -24,6 +24,9 @@ export const OccurrenceDto = z.object({
   allDay: z.boolean(),
   timeZone: z.string(),
   rrule: z.string().nullable(),
+  /** Start / end of the series' first instance, for edits of the whole series from one instance. */
+  seriesStart: z.string(),
+  seriesEnd: z.string(),
   tags: z.array(z.string()),
   mentions: z.array(z.string()),
   color: z.string(),
@@ -103,6 +106,8 @@ export function toOccurrenceDto(
     allDay: o.allDay,
     timeZone: o.timeZone,
     rrule: o.rrule,
+    seriesStart: o.seriesStart,
+    seriesEnd: o.seriesEnd,
     tags: markers.tags,
     mentions: markers.mentions,
     color: ctx.color,

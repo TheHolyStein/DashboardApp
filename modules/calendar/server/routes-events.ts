@@ -216,7 +216,16 @@ export function registerEventRoutes(r: ModuleRouter, host: HostServices, afterWr
     return result;
   });
 
-  // ModuleApi.delete sends no body, so the fields may come in the query.
+  // The client's ModuleApi.delete can send neither a body nor a query: it deletes through this POST instead.
+  r.post('/events/:uid/delete', { level: 'edit', body: DeleteFields }, async (req) => {
+    const uid = req.params['uid'] ?? '';
+    requireWritable(db, req.body.calendarId, req.user.id, req.level);
+    const changes = removeEvent(db, uid, req.body, { userId: req.user.id, now: host.now() });
+    await afterWrite(host, changes);
+    return undefined;
+  });
+
+  // For other HTTP clients: the fields in the body or the query.
   r.delete('/events/:uid', { level: 'edit', body: DeleteFields.optional(), query: DeleteFields.partial() }, async (req) => {
     const uid = req.params['uid'] ?? '';
     const parsed = DeleteFields.safeParse(req.body ?? req.query);

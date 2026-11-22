@@ -1,30 +1,53 @@
 <script lang="ts">
+  // Calendar tile: today's remaining events, then the next days grouped by date. At min size only the next event.
+  // Without `data` a loading line; with no events an empty state. "+" (edit, owner) opens the detail in create mode.
   import type { TileProps } from '@dash/contract';
+  import { Button, Empty } from '@dash/ui';
+  import type { Settings } from '../manifest.js';
+  import type { Snapshot } from '../server/reminders.js';
+  import Agenda from './Agenda.svelte';
+  import { byStart, dayLabel, formatClock, localDay, startDay, viewerWall } from './format.js';
 
-  // The shell opens the detail view when the tile frame (or its title) is activated; no open button needed.
-  // Set `detail: false` in client/index.ts for a tile without a detail view.
-  let { data, updatedAt, stale, level, isOwner, t, locale, timeZone }: TileProps<{ value: number; label: string }> = $props();
+  let { data, level, isOwner, size, t, locale, timeZone, openDetail }: TileProps<Snapshot, Settings> = $props();
 
-  // Format with the user's saved locale and time zone from props; never the browser's or the server's default.
-  const number = $derived(new Intl.NumberFormat(locale));
-  const time = $derived(
-    updatedAt ? new Intl.DateTimeFormat(locale, { timeStyle: 'short', timeZone }).format(new Date(updatedAt)) : '',
-  );
+  const items = $derived([...(data?.today ?? []), ...(data?.next ?? [])].sort(byStart));
+  const compact = $derived(size.w <= 2 || size.h <= 2);
+  const today = $derived(localDay(Date.now(), timeZone));
+  const first = $derived(items.find((o) => !o.allDay) ?? items[0]);
+  const canEdit = $derived(level === 'edit' && isOwner);
 </script>
 
-<section class:stale>
-  <h3>{t('m.calendar.title', 'Calendar')}</h3>
-  {#if data}
-    <p>{data.label}</p>
-    <!-- Formatted numbers, times and dates are data, not words: mark them with data-value instead of wrapping in t(). -->
-    <p><span data-value>{number.format(data.value)}</span></p>
-    {#if time}<p><span data-value>{time}</span></p>{/if}
+<div class="cal-tile">
+  {#if !data}
+    <p class="muted">{t('m.calendar.loading', 'Loading…')}</p>
+  {:else if items.length === 0}
+    <Empty text={t('m.calendar.empty', 'No upcoming events.')} />
+  {:else if compact && first}
+    {@const label = dayLabel(startDay(first, timeZone), today, { locale, t })}
+    <div class="next" data-testid="next-event">
+      <span class="dot" style:background={first.color} aria-hidden="true"></span>
+      <span class="title" data-user>{first.displayTitle}</span>
+      <span class="when">
+        {#if label.isWord}{label.text}{:else}<span data-value>{label.text}</span>{/if}
+        {#if !first.allDay}<span data-value>{formatClock(viewerWall(first, 'start', timeZone), locale)}</span>{/if}
+      </span>
+    </div>
   {:else}
-    <p>{t('m.calendar.loading', 'Loading')}</p>
+    <Agenda {items} {today} {t} {locale} {timeZone} />
   {/if}
-  <!-- The frame already shows a stale badge; do not re-implement it. Just do not invent progress from stale data. -->
-  <!-- User-written text (names, titles, notes) is exempt from t(): wrap it, e.g. <span data-user>{item.title}</span>. -->
-  {#if level === 'edit' && isOwner}
-    <button type="button" data-edit>{t('m.calendar.edit', 'Edit')}</button>
+  {#if canEdit && !compact}
+    <div class="add">
+      <Button data-edit onclick={() => openDetail({ mode: 'create' })} aria-label={t('m.calendar.newEvent', 'New event')}>+</Button>
+    </div>
   {/if}
-</section>
+</div>
+
+<style>
+  .cal-tile { position: relative; display: grid; align-content: start; gap: 0.5rem; width: 100%; height: 100%; overflow: auto; color: var(--db-fg); }
+  .muted { margin: 0; color: var(--db-muted); }
+  .next { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.5rem; align-items: center; }
+  .next .when { grid-column: 2; color: var(--db-muted); display: flex; gap: 0.4em; }
+  .next .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; }
+  .add { position: sticky; bottom: 0; justify-self: end; }
+</style>

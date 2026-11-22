@@ -1,6 +1,27 @@
 # Calendar (`calendar`)
 
-TODO: what this module shows, where its data comes from, which settings it has.
+Shared calendars with recurring events, read-only ICS subscriptions, reminders and commands written into event titles.
+Events are stored as raw ICS (the source of truth, ready for CalDAV in plan 08); indexed columns are derived from it.
+
+**Tile:** today's remaining events, then the next days (≤ 8 within `daysAhead`), grouped Today / Tomorrow / date; at
+min size only the next event. **Detail:** agenda, day, week (3 days on phones) and month views, calendar filter, editor
+with repeat picker and live command chips; drag to move or resize (15-minute steps).
+
+**Settings:** `calendarIds` (empty = all visible), `defaultView`, `weekStart`, `daysAhead`. **Config:**
+`defaultReminderMin`, `deriveHorizonDays`.
+
+**API:** `GET /calendars`, `POST /calendars`, `PATCH|DELETE /calendars/:id`, `PUT /calendars/:id/shares`,
+`GET /events?from&to&calendarIds`, `POST /events`, `PUT /events/:uid` (`etag`, `scope: all|this|future`,
+`occurrenceStart`), `POST /events/:uid/delete` (the client's way; `DELETE /events/:uid` takes the fields as query),
+`POST /subscriptions`, `DELETE /subscriptions/:id`. A stale `etag` answers 409 with the current event in `details`.
+
+**Commands** (title or description): `@handle` (deadline todo), `#shopping a, b`, `#chore`, `!remind 30m|2h|1d`,
+`!prep 2d`, `!countdown`, `!pin`, `!wled [target:]preset`, `#private` (only the creator sees it), `#outdoor`,
+`#birthday [year]`. The `derive` job reconciles them into requests to other modules by `sourceKey`
+(`calendar:<uid>:<occurrence|single>:<kind>:<hash>`); bookkeeping is committed before publishing.
+
+**Privacy:** private events never go into tile snapshots (the page may be shared) and are hidden from everyone but
+their creator in `GET /events` and day summaries.
 
 - `manifest.ts`: id, tile sizes, jobs, events, outbound hosts. Imported by server and client.
 - `server/index.ts`: migrations, jobs, routes, event handlers.
