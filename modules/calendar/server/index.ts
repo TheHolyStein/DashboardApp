@@ -16,6 +16,7 @@ import {
   type CalendarRow,
   type ShareLevel,
 } from './calendars.js';
+import { reconcile } from './derive.js';
 import { migrations } from './migrations.js';
 import { registerEventRoutes, type AfterWrite } from './routes-events.js';
 import {
@@ -63,15 +64,21 @@ export function toCalendarDto(host: HostServices, row: CalendarRow, userId: User
 function createServer() {
   /** After a committed event write: publish, then re-derive and refresh snapshots (failures logged, not thrown). */
   const afterWrite: AfterWrite = async (host, changes) => {
-    for (const c of changes) host.bus.publish('calendar.event.changed', c);
     try {
+      for (const c of changes) host.bus.publish('calendar.event.changed', c);
       await refresh(host);
     } catch (err) {
       host.log.error('calendar: refresh after a write failed', { err: String(err) });
     }
   };
-  // Filled in by derive (C5) and reminders (C6).
-  const refresh = (host: HostServices): Promise<void> => Promise.resolve(void host);
+  // Derive runs one at a time (the job and post-write hooks would otherwise diff against each other's half-done work).
+  let chain: Promise<void> = Promise.resolve();
+  const serial = (fn: () => Promise<void>): Promise<void> => {
+    const run = chain.then(fn, fn);
+    chain = run.catch(() => undefined);
+    return run;
+  };
+  const refresh = (host: HostServices): Promise<void> => serial(() => reconcile(host, host.now()));
 
   return defineServer({
     manifest,
@@ -79,8 +86,8 @@ function createServer() {
     jobs: {
       // TODO(C6): reminders, event.upcoming / event.started, day summary.
       reminders: () => Promise.resolve(),
-      // TODO(C5): derived items (todo.create.request, pin.request, countdown.request, wled.apply.request).
-      derive: () => Promise.resolve(),
+      // Derived items (todo.create.request, pin.request, countdown.request, reminders).
+      derive: ({ host }) => refresh(host),
       // Read-only subscriptions: fetched one after another (they share host.http's limits), imported atomically each.
       subscriptions: async ({ host, signal }) => {
         const changes = [];

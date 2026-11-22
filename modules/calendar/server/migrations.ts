@@ -66,4 +66,32 @@ export const migrations: Migration[] = [
         PRIMARY KEY (calendar_id, seq)
       );`,
   },
+  {
+    id: 3,
+    // Bookkeeping of what was derived from event commands (todos, pins, countdowns, reminders). `occurrence` is the
+    // occurrence's start instant; `remove_json` is the event published when the item vanishes (null: nothing to undo).
+    // Reminders: `action_json` null = notify `user_ids`; otherwise an event {name, payload} to publish at `fire_at`.
+    up: `CREATE TABLE m_calendar_derived (
+        source_key TEXT PRIMARY KEY,
+        calendar_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        occurrence TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        remove_json TEXT
+      );
+      CREATE INDEX m_calendar_derived_event ON m_calendar_derived (calendar_id, uid);
+      CREATE TABLE m_calendar_reminders (
+        source_key TEXT PRIMARY KEY,
+        calendar_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        occurrence TEXT NOT NULL,
+        fire_at TEXT NOT NULL,
+        user_ids TEXT NOT NULL DEFAULT '[]',
+        title TEXT NOT NULL DEFAULT '',
+        action_json TEXT,
+        fired INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX m_calendar_reminders_due ON m_calendar_reminders (fired, fire_at);`,
+  },
 ];
