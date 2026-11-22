@@ -23,6 +23,8 @@ export interface Occurrence {
   isOverride: boolean;
   isRecurring: boolean;
   isPrivate: boolean;
+  /** The series' RRULE (also on its overridden instances), null for a single event. */
+  rrule: string | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -31,7 +33,7 @@ export const MAX_OCCURRENCES = 2000;
 /** Upper bound for ical.js iterations per series (a FREQ=SECONDLY rule must not hang the server). */
 const MAX_STEPS = 60_000;
 
-function occurrenceOf(calendarId: string, ev: ResourceEvent, o: { startMs: number; endMs: number; recurrenceId: string; isOverride: boolean }): Occurrence {
+function occurrenceOf(calendarId: string, ev: ResourceEvent, rrule: string | null, o: { startMs: number; endMs: number; recurrenceId: string; isOverride: boolean }): Occurrence {
   const p = ev.parsed;
   const startWall = p.allDay ? o.startMs : utcToWall(ev.zone, o.startMs);
   const endWall = p.allDay ? o.endMs : utcToWall(ev.zone, o.endMs);
@@ -51,6 +53,7 @@ function occurrenceOf(calendarId: string, ev: ResourceEvent, o: { startMs: numbe
     isOverride: o.isOverride,
     isRecurring: ev.recurring || p.recurrenceId !== '',
     isPrivate: ev.isPrivate,
+    rrule,
   };
 }
 
@@ -119,7 +122,7 @@ export function expand(events: StoredEvent[], from: Date, to: Date, max: number 
         if (inst.key !== '' && overridden.has(inst.key)) continue;
         const endMs = inst.startMs + duration;
         if (inWindow(inst.startMs, endMs)) {
-          found.push(occurrenceOf(row.calendar_id, master, { startMs: inst.startMs, endMs, recurrenceId: inst.key, isOverride: false }));
+          found.push(occurrenceOf(row.calendar_id, master, master.parsed.rrule, { startMs: inst.startMs, endMs, recurrenceId: inst.key, isOverride: false }));
           if (found.length >= max) break;
         }
       }
@@ -127,7 +130,7 @@ export function expand(events: StoredEvent[], from: Date, to: Date, max: number 
     for (const ov of overrides) {
       if (ov.cancelled || (master?.cancelled ?? false)) continue;
       if (inWindow(ov.startMs, ov.endMs)) {
-        found.push(occurrenceOf(row.calendar_id, ov, { startMs: ov.startMs, endMs: ov.endMs, recurrenceId: ov.parsed.recurrenceId, isOverride: true }));
+        found.push(occurrenceOf(row.calendar_id, ov, master?.parsed.rrule ?? null, { startMs: ov.startMs, endMs: ov.endMs, recurrenceId: ov.parsed.recurrenceId, isOverride: true }));
       }
     }
     out.push(...found);

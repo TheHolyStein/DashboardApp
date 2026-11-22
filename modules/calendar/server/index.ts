@@ -17,6 +17,7 @@ import {
   type ShareLevel,
 } from './calendars.js';
 import { migrations } from './migrations.js';
+import { registerEventRoutes, type AfterWrite } from './routes-events.js';
 
 const Color = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be #rrggbb');
 const Name = z.string().trim().min(1).max(80);
@@ -53,6 +54,18 @@ export function toCalendarDto(host: HostServices, row: CalendarRow, userId: User
 }
 
 function createServer() {
+  /** After a committed event write: publish, then re-derive and refresh snapshots (failures logged, not thrown). */
+  const afterWrite: AfterWrite = async (host, changes) => {
+    for (const c of changes) host.bus.publish('calendar.event.changed', c);
+    try {
+      await refresh(host);
+    } catch (err) {
+      host.log.error('calendar: refresh after a write failed', { err: String(err) });
+    }
+  };
+  // Filled in by derive (C5) and reminders (C6).
+  const refresh = (host: HostServices): Promise<void> => Promise.resolve(void host);
+
   return defineServer({
     manifest,
     migrations,
@@ -70,6 +83,8 @@ function createServer() {
       const notImplemented = (): Promise<{ status: number }> => Promise.resolve({ status: 501 });
       r.raw('/dav', notImplemented);
       r.raw('/.well-known/caldav', notImplemented);
+
+      registerEventRoutes(r, host, afterWrite);
 
       r.get('/calendars', { level: 'view' }, (req) => {
         ensurePersonal(db, req.user.id, host.now());

@@ -62,6 +62,8 @@ export interface ResourceEvent {
 export interface Resource {
   uid: string;
   events: ResourceEvent[];
+  /** The parsed VCALENDAR the events belong to (with VTIMEZONEs for every TZID used). */
+  root: ICAL.Component;
 }
 
 type JCal = [string, unknown[], unknown[]];
@@ -274,12 +276,38 @@ export function readResource(ics: string, opts: { toYear?: number } = {}): Resou
   }
   const uid = events[0]!.parsed.uid;
   if (events.some((e) => e.parsed.uid !== uid)) throw invalid('one resource must hold exactly one UID');
-  return { uid, events };
+  return { uid, events, root };
 }
 
 /** Master and overrides of one resource as plain data. Throws DashError('invalid'). */
 export function fromVCalendar(ics: string): ParsedEvent[] {
   return readResource(ics).events.map((e) => e.parsed);
+}
+
+/**
+ * A DATE or DATE-TIME property for a wall time. `tzid` is an IANA name (written as the TZID parameter, the file must
+ * define the zone), `UTC` (written with `Z`) or `floating`.
+ */
+export function timeProperty(name: string, wall: number, allDay: boolean, tzid: string): ICAL.Property {
+  const named = !allDay && tzid !== 'UTC' && tzid !== 'floating';
+  const d = new Date(wall);
+  // The zone's TZID parameter is written explicitly (a Time's own zone object is not enough for ical.js).
+  const t = new ICAL.Time(
+    {
+      year: d.getUTCFullYear(),
+      month: d.getUTCMonth() + 1,
+      day: d.getUTCDate(),
+      hour: allDay ? 0 : d.getUTCHours(),
+      minute: allDay ? 0 : d.getUTCMinutes(),
+      second: allDay ? 0 : d.getUTCSeconds(),
+      isDate: allDay,
+    },
+    !allDay && tzid === 'UTC' ? ICAL.Timezone.utcTimezone : ICAL.Timezone.localTimezone,
+  );
+  const prop = new ICAL.Property(name);
+  prop.setValue(t);
+  if (named) prop.setParameter('tzid', tzid);
+  return prop;
 }
 
 /** A full VCALENDAR (VERSION, PRODID, VTIMEZONE when needed, one VEVENT). */
@@ -304,26 +332,7 @@ export function toVEvent(input: EventInput, uid: string, now: Date): string {
     vcal.addSubcomponent(parseComponent(intlVTimezone(tzid, year - 2, year + 2, true)));
   }
 
-  // Time value with the zone's TZID parameter written explicitly (a Time's own zone object is not enough for ical.js).
-  const timeProp = (name: string, wall: number): ICAL.Property => {
-    const d = new Date(wall);
-    const t = new ICAL.Time(
-      {
-        year: d.getUTCFullYear(),
-        month: d.getUTCMonth() + 1,
-        day: d.getUTCDate(),
-        hour: allDay ? 0 : d.getUTCHours(),
-        minute: allDay ? 0 : d.getUTCMinutes(),
-        second: allDay ? 0 : d.getUTCSeconds(),
-        isDate: allDay,
-      },
-      !allDay && tzid === 'UTC' ? ICAL.Timezone.utcTimezone : ICAL.Timezone.localTimezone,
-    );
-    const prop = new ICAL.Property(name);
-    prop.setValue(t);
-    if (named) prop.setParameter('tzid', tzid);
-    return prop;
-  };
+  const timeProp = (name: string, wall: number): ICAL.Property => timeProperty(name, wall, allDay, tzid);
 
   const ve = new ICAL.Component('vevent');
   ve.addPropertyWithValue('uid', uid);
@@ -348,3 +357,99 @@ export function toVEvent(input: EventInput, uid: string, now: Date): string {
   return vcal.toString();
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// Editing a stored resource (the event API's "this" / "future" scopes)
+
+function masterOf(res: Resource): ResourceEvent {
+  const master = res.events.find((e) => e.parsed.recurrenceId === '');
+  if (!master || !master.recurring) throw invalid('not a recurring event');
+  return master;
+}
+
+/** The recurrence key (RECURRENCE-ID form) of a series' first instance. */
+export function firstKey(master: ResourceEvent): string {
+  return recurrenceKey(master.dtstart);
+}
+
+/** Wall time, in the master's own zone, of an instance key. */
+function keyWall(master: ResourceEvent, key: string): number {
+  if (master.parsed.allDay) return parseWall(key, true);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(key)) throw invalid(`bad occurrence start "${key}"`);
+  return utcToWall(master.zone, Date.parse(key));
+}
+
+function keyMs(key: string): number {
+  return key.length === 10 ? Date.parse(`${key}T00:00:00Z`) : Date.parse(key);
+}
+
+function removeOverride(res: Resource, key: string): void {
+  for (const ev of res.events) {
+    if (ev.parsed.recurrenceId === key) res.root.removeSubcomponent(ev.vevent);
+  }
+}
+
+/** Copies VTIMEZONEs of `from` that `to` does not have yet. */
+function copyZones(from: ICAL.Component, to: ICAL.Component): void {
+  for (const vtz of from.getAllSubcomponents('vtimezone')) {
+    const tzid = vtz.getFirstPropertyValue('tzid');
+    if (typeof tzid === 'string' && !to.getTimeZoneByID(tzid)) to.addSubcomponent(vtz);
+  }
+}
+
+/** The resource with instance `key` replaced by a single (overridden) event built from `input`. */
+export function withOverride(ics: string, key: string, input: EventInput, now: Date): string {
+  const res = readResource(ics);
+  const master = masterOf(res);
+  const wall = keyWall(master, key);
+  const built = parseRoot(toVEvent({ ...input, rrule: null, exdates: [] }, res.uid, now));
+  const ve = built.getFirstSubcomponent('vevent');
+  if (!ve) throw invalid('could not build the instance');
+  ve.addProperty(timeProperty('recurrence-id', wall, master.parsed.allDay, master.parsed.timeZone));
+  removeOverride(res, key);
+  copyZones(built, res.root);
+  res.root.addSubcomponent(ve);
+  return res.root.toString();
+}
+
+/** The resource with instance `key` left out (EXDATE on the master; an override of it is removed). */
+export function withExdate(ics: string, key: string): string {
+  const res = readResource(ics);
+  const master = masterOf(res);
+  const wall = keyWall(master, key);
+  removeOverride(res, key);
+  master.vevent.addProperty(timeProperty('exdate', wall, master.parsed.allDay, master.parsed.timeZone));
+  return res.root.toString();
+}
+
+/** The series ending before instance `key` (RRULE UNTIL; later overrides are removed). */
+export function truncatedBefore(ics: string, key: string): string {
+  const res = readResource(ics);
+  const master = masterOf(res);
+  keyWall(master, key); // validates the key
+  const rule: unknown = master.vevent.getFirstPropertyValue('rrule');
+  if (!(rule instanceof ICAL.Recur)) throw invalid('the series has no RRULE to end');
+  const cut = keyMs(key);
+  const recur = rule.clone();
+  recur.count = null;
+  if (master.parsed.allDay) {
+    const d = new Date(cut - DAY_MS);
+    recur.until = new ICAL.Time({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(), isDate: true }, ICAL.Timezone.localTimezone);
+  } else {
+    recur.until = ICAL.Time.fromJSDate(new Date(cut - 1000), true);
+  }
+  master.vevent.updatePropertyWithValue('rrule', recur);
+  for (const ev of res.events) {
+    if (ev.parsed.recurrenceId !== '' && keyMs(ev.parsed.recurrenceId) >= cut) res.root.removeSubcomponent(ev.vevent);
+  }
+  return res.root.toString();
+}
+
+/** `next` (a one-VEVENT calendar for the same UID) carrying over the overridden instances of `ics`. */
+export function withOverridesOf(ics: string, next: string): string {
+  const old = readResource(ics);
+  const root = parseRoot(next);
+  copyZones(old.root, root);
+  for (const ev of old.events) if (ev.parsed.recurrenceId !== '') root.addSubcomponent(ev.vevent);
+  return root.toString();
+}

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DashError, type ModuleDb, type UserId } from '@dash/contract';
 import { readResource, type ResourceEvent } from './ical.js';
 import { seriesEnd } from './recurrence.js';
+import { eventMarkers } from './commands/parse.js';
 
 /** A row of m_calendar_events. */
 export interface StoredEvent {
@@ -98,11 +99,12 @@ export function upsertEvent(
     db.run('DELETE FROM m_calendar_events WHERE calendar_id = ? AND uid = ?', [calendarId, resource.uid]);
     for (const ev of resource.events) {
       const p = ev.parsed;
+      const markers = eventMarkers(p.title, p.description);
       db.run(
         `INSERT INTO m_calendar_events
            (uid, calendar_id, recurrence_id, ics, etag, summary, description, location, dtstart_utc, dtend_utc,
             all_day, tzid, has_rrule, until_utc, tags, mentions, is_private, creator_id, modified_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           resource.uid,
           calendarId,
@@ -118,7 +120,9 @@ export function upsertEvent(
           p.timeZone,
           ev.recurring ? 1 : 0,
           untilOf(ev),
-          ev.isPrivate ? 1 : 0,
+          JSON.stringify(markers.tags),
+          JSON.stringify(markers.mentions),
+          ev.isPrivate || markers.isPrivate ? 1 : 0,
           existing?.creator_id ?? opts.creatorId,
           at,
         ],
