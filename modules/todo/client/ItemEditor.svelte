@@ -92,7 +92,7 @@
         <input data-edit bind:value={qty} maxlength="40" />
     </Field>
   {/if}
-  <Field label={t('m.todo.due', 'Due')} help={list === 'week' || list === 'month' ? t('m.todo.dueHelp', 'Empty = end of the current period') : undefined}>
+  <Field label={t('m.todo.due', 'Due')} {...(list === 'week' || list === 'month' ? { help: t('m.todo.dueHelp', 'Empty = end of the current period') } : {})}>
       <span class="inline">
         <input data-edit type="date" bind:value={day} />
         {#if day !== ''}<Button data-edit onclick={() => (day = '')}>{t('m.todo.clearDue', 'Clear')}</Button>{/if}

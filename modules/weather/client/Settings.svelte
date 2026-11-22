@@ -16,7 +16,11 @@
 
   const current = $derived<Settings>({
     location: value?.location ?? null,
-    show: { pollen: true, air: true, uv: true, ...value?.show },
+    show: {
+      pollen: value?.show?.pollen ?? true,
+      air: value?.show?.air ?? true,
+      uv: value?.show?.uv ?? true,
+    },
     pollenTypes: value?.pollenTypes ?? [...POLLEN_TYPES],
   });
 
