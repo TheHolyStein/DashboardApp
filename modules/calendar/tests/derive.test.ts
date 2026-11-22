@@ -103,6 +103,6 @@ describe('derive', () => {
     const { router, host } = await setup();
     const cal = await personal(router, 'u1');
     await create(router, 'u1', { calendarId: cal, title: 'Meeting !foo bar #baz' });
-    expect(host.published.filter((p) => p.name !== 'calendar.event.changed')).toEqual([]);
+    expect(host.published.filter((p) => p.name !== 'calendar.event.changed' && p.name !== 'calendar.day.summary')).toEqual([]);
   });
 });

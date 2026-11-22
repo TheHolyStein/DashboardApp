@@ -17,6 +17,7 @@ import {
   type ShareLevel,
 } from './calendars.js';
 import { reconcile } from './derive.js';
+import { announce, createViews, fireReminders, publishViews, type Views } from './reminders.js';
 import { migrations } from './migrations.js';
 import { registerEventRoutes, type AfterWrite } from './routes-events.js';
 import {
@@ -78,14 +79,39 @@ function createServer() {
     chain = run.catch(() => undefined);
     return run;
   };
-  const refresh = (host: HostServices): Promise<void> => serial(() => reconcile(host, host.now()));
+  let views: Views | null = null;
+  const viewsOf = (): Views => {
+    if (!views) throw new Error('calendar: setup has not run');
+    return views;
+  };
+  const refresh = (host: HostServices): Promise<void> =>
+    serial(async () => {
+      await reconcile(host, host.now());
+      await publishViews(host, viewsOf(), host.now());
+    });
 
   return defineServer({
     manifest,
     migrations,
+    setup(host) {
+      views = createViews(host);
+    },
+    teardown() {
+      views = null;
+    },
+    onInstanceChange: async (kind, instance, host) => {
+      if (kind === 'removed') viewsOf().pusher.forget(instance.id);
+      else await serial(() => publishViews(host, viewsOf(), host.now()));
+    },
     jobs: {
-      // TODO(C6): reminders, event.upcoming / event.started, day summary.
-      reminders: () => Promise.resolve(),
+      // Due reminders, event.upcoming / event.started, day summaries and tile snapshots.
+      reminders: ({ host }) =>
+        serial(async () => {
+          const now = host.now();
+          await fireReminders(host, now);
+          await announce(host, viewsOf(), now);
+          await publishViews(host, viewsOf(), now);
+        }),
       // Derived items (todo.create.request, pin.request, countdown.request, reminders).
       derive: ({ host }) => refresh(host),
       // Read-only subscriptions: fetched one after another (they share host.http's limits), imported atomically each.
