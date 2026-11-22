@@ -14,7 +14,7 @@ Without it the routes answer 500 and snapshots are not updated; the module still
 arrives, or when the user marks read or changes a mute. `unread` leaves out muted modules; `latest` are the newest
 **unread** notifications of modules that are not muted. Core stores a muted module's notifications already read and
 publishes no event for them (so they never raise the count and never reach push sinks); mutes set later also take a
-module's earlier unread notifications out of the count (counted up to 100 per muted module).
+module's earlier unread notifications out of the count (paged with `before` until a short page, so any number is subtracted).
 
 ## Routes (all `view`: they only touch the caller's own state)
 
@@ -23,7 +23,7 @@ module's earlier unread notifications out of the count (counted up to 100 per mu
 | `GET /list?before&unreadOnly&moduleId` | page of 50, newest first; `next` is the next `before` cursor |
 | `POST /read` `{ ids: string[] \| 'all' }` | mark read; answers `{ epoch, rev, unread }` |
 | `GET /mutes` | active mutes `{ moduleId: ISO time \| 'forever' }` |
-| `PUT /mutes` `{ moduleId, until: ISO future time \| 'forever' \| null }` | set or remove a mute (the service is core's `setMute`) |
+| `PUT /mutes` `{ moduleId, hours: 1 \| 8 \| 24 \| 'forever' \| null }` | set or remove a mute; the server computes the ISO end time from its own clock (core's `setMute`) |
 
 `POST /read` and `PUT /mutes` are listed in the server suite's `viewWrites`.
 
@@ -39,3 +39,5 @@ module's earlier unread notifications out of the count (counted up to 100 per mu
 - `server/index.ts`: handler, routes, setup (revisions, epoch).
 - `client/`: `Tile.svelte`, `Detail.svelte`, `format.ts`.
 - `tests/`: `server.test.ts`, `client.test.ts`, `fake-notifications.ts` (in-memory stand-in for the privileged service, same semantics as core's). Run `pnpm --filter @dash/module-notifications test`.
+
+Users without a notifications instance get no stored revision and no snapshot building.

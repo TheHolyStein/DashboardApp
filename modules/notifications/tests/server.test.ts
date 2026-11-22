@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { ModuleInstance } from '@dash/contract';
 import { createMockHostWithSetup, createMockRouter, runServerContractSuite } from '@dash/module-kit/testing';
 import server from '../server/index.js';
@@ -88,7 +88,7 @@ describe('snapshot', () => {
 
   test('muted module does not raise unread', async () => {
     const { fake, router, as, last, pushedTo, tick } = await setup();
-    const mute = await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', until: 'forever' } });
+    const mute = await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: 'forever' } });
     expect(mute.status).toBe(200);
     expect((mute.body as MutesState).mutes).toEqual({ weather: 'forever' });
     const before = pushedTo('i1').length;
@@ -112,20 +112,33 @@ describe('snapshot', () => {
     tick();
     await fake.create('u1', 'nas', 'warn', 'Disk slow');
     expect(last('i1').unread).toBe(2);
-    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', until: 'forever' } });
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: 'forever' } });
     expect(last('i1')).toMatchObject({ unread: 1 });
     expect(last('i1').latest.map((n) => n.title)).toEqual(['Disk slow']);
-    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', until: null } });
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: null } });
     expect(last('i1')).toMatchObject({ unread: 2 });
+  });
+
+  test('150 unread notifications of a muted module are all subtracted and older unmuted ones still show', async () => {
+    const { fake, router, as, last, host } = await setup();
+    await fake.create('u1', 'nas', 'warn', 'Oldest unmuted');
+    for (let i = 0; i < 150; i++) {
+      host.advance(1000);
+      await fake.create('u1', 'weather', 'info', `w${i}`);
+    }
+    expect(last('i1').unread).toBe(151);
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: 'forever' } });
+    expect(last('i1').unread).toBe(1);
+    expect(last('i1').latest.map((n) => n.title)).toEqual(['Oldest unmuted']);
   });
 
   test('a mute that has run out no longer counts', async () => {
     const { fake, router, as, last, host, tick } = await setup();
     await fake.create('u1', 'weather', 'warn', 'Storm tonight');
     tick();
-    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', until: '2026-11-12T09:00:00.000Z' } });
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: 1 } });
     expect(last('i1').unread).toBe(0);
-    host.setNow(new Date('2026-11-12T09:00:01.000Z'));
+    host.setNow(new Date('2026-11-12T09:00:02.000Z'));
     await fake.create('u1', 'nas', 'info', 'later'); // any push rebuilds the snapshot
     expect(last('i1').unread).toBe(2);
   });
@@ -194,22 +207,23 @@ describe('routes', () => {
   test('GET and PUT /mutes: set, list, change and remove a mute', async () => {
     const { router, as } = await setup();
     expect(((await router.call('GET', '/mutes', { ...as('u1') })).body as MutesState).mutes).toEqual({});
-    const until = '2026-11-12T10:00:00.000Z';
-    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', until } });
-    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'nas', until: 'forever' } });
+    const until = '2026-11-12T16:00:00.000Z'; // START + 8 h, computed by the server
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'weather', hours: 8 } });
+    await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'nas', hours: 'forever' } });
     expect(((await router.call('GET', '/mutes', { ...as('u1') })).body as MutesState).mutes).toEqual({ weather: until, nas: 'forever' });
-    const removed = await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'nas', until: null } });
+    const removed = await router.call('PUT', '/mutes', { ...as('u1'), body: { moduleId: 'nas', hours: null } });
     expect((removed.body as MutesState).mutes).toEqual({ weather: until });
     // Mutes are the caller's own.
     expect(((await router.call('GET', '/mutes', { ...as('u2') })).body as MutesState).mutes).toEqual({});
   });
 
-  test('PUT /mutes rejects a bad module id, a bad time and a time in the past', async () => {
+  test('PUT /mutes rejects a bad module id and a bad duration', async () => {
     const { router, as } = await setup();
     const put = (body: unknown) => router.call('PUT', '/mutes', { ...as('u1'), body });
     expect((await put({ moduleId: 'X', until: 'forever' })).status).toBe(422);
-    expect((await put({ moduleId: 'nas', until: 'tomorrow' })).status).toBe(422);
-    expect((await put({ moduleId: 'nas', until: '2026-11-12T07:00:00.000Z' })).status).toBe(422);
+    expect((await put({ moduleId: 'nas', hours: 'tomorrow' })).status).toBe(422);
+    expect((await put({ moduleId: 'nas', hours: 5 })).status).toBe(422);
+    expect((await put({ moduleId: 'nas', until: '2026-11-12T20:00:00.000Z' })).status).toBe(422); // the client sends no times
     expect((await put({ moduleId: 'nas' })).status).toBe(422);
   });
 
@@ -219,6 +233,16 @@ describe('routes', () => {
     expect((await router.call('GET', '/list', { level: 'view' })).status).toBe(500);
     await server.on!['notification.created']!({ id: 'x', userId: 'u1', moduleId: 'nas', level: 'info', title: 't', createdAt: START.toISOString() }, host);
     expect(host.pushed).toEqual([]);
+  });
+});
+
+describe('users without an instance', () => {
+  test('an event for them stores no revision and builds no snapshot', async () => {
+    const { fake, host } = await setup();
+    const spy = vi.spyOn(fake.api, 'list');
+    await fake.create('u3', 'nas', 'warn', 'nobody listens');
+    expect(spy).not.toHaveBeenCalled();
+    expect(await host.store.keys()).toEqual([]);
   });
 });
 

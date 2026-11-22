@@ -120,11 +120,11 @@
 
   async function setMute(moduleId: string, choice: string, el: HTMLSelectElement): Promise<void> {
     if (choice === 'timed') return;
-    const hours = HOURS[choice];
-    const until = choice === 'off' ? null : choice === 'forever' ? 'forever' : new Date(new Date().getTime() + (hours ?? 1) * 3_600_000).toISOString();
+    // The server computes the end time from its own clock.
+    const hours = choice === 'off' ? null : choice === 'forever' ? 'forever' : (HOURS[choice] ?? 1);
     error = '';
     try {
-      applyMutes(await api.put<MutesState>('/mutes', { moduleId, until }));
+      applyMutes(await api.put<MutesState>('/mutes', { moduleId, hours }));
     } catch {
       error = t('m.notifications.saveFailed', 'Could not save your change.');
       el.value = choiceOf(moduleId);

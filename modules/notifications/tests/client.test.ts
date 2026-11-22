@@ -23,6 +23,7 @@ function tileProps(over: Partial<TileProps<Snapshot>> = {}): TileProps<Snapshot>
     level: 'view',
     size: { w: 3, h: 2 },
     mode: 'day',
+    instanceId: 'i1',
     api: {} as ModuleApi,
     t: identityT,
     locale: 'en',
@@ -56,14 +57,15 @@ function fakeApi(over: { list?: (q: Record<string, unknown> | undefined) => Prom
     return Promise.resolve({ epoch: fixture.epoch, rev: 5, unread: 0 } satisfies ReadResult);
   });
   const put = vi.fn((...args: unknown[]) => {
-    const b = args[1] as { moduleId: string; until: string | null };
-    return Promise.resolve(mutes(b.until === null ? {} : { [b.moduleId]: b.until }, 5));
+    const b = args[1] as { moduleId: string; hours: number | 'forever' | null };
+    return Promise.resolve(mutes(b.hours === null ? {} : { [b.moduleId]: b.hours === 'forever' ? 'forever' : '2026-11-12T16:00:00.000Z' }, 5));
   });
   return { api: { get, post, put } as unknown as ModuleApi, get, post, put };
 }
 
 function detailProps(over: Partial<DetailProps<Snapshot>> = {}, api: ModuleApi = fakeApi().api): DetailProps<Snapshot> {
   return {
+    instanceId: 'i1',
     data: fixture,
     updatedAt: NOW,
     stale: false,
@@ -223,18 +225,18 @@ describe('Detail', () => {
     const select = screen.getByLabelText<HTMLSelectElement>('Mute nas');
     expect(select.value).toBe('off');
     await fireEvent.change(select, { target: { value: 'forever' } });
-    await waitFor(() => expect(put).toHaveBeenCalledWith('/mutes', { moduleId: 'nas', until: 'forever' }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith('/mutes', { moduleId: 'nas', hours: 'forever' }));
     await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>('Mute nas').value).toBe('forever'));
     await fireEvent.change(screen.getByLabelText('Mute nas'), { target: { value: 'off' } });
-    await waitFor(() => expect(put).toHaveBeenLastCalledWith('/mutes', { moduleId: 'nas', until: null }));
+    await waitFor(() => expect(put).toHaveBeenLastCalledWith('/mutes', { moduleId: 'nas', hours: null }));
   });
 
-  test('a timed mute sends an ISO time that many hours ahead', async () => {
+  test('a timed mute sends the number of hours, not a time', async () => {
     const { api, put } = fakeApi();
     render(client.Detail, { props: detailProps({}, api) });
     await waitFor(() => expect(screen.getByText('NAS failed')).toBeTruthy());
     await fireEvent.change(screen.getByLabelText('Mute nas'), { target: { value: '8h' } });
-    await waitFor(() => expect(put).toHaveBeenCalledWith('/mutes', { moduleId: 'nas', until: '2026-11-12T16:00:00.000Z' }));
+    await waitFor(() => expect(put).toHaveBeenCalledWith('/mutes', { moduleId: 'nas', hours: 8 }));
   });
 
   test('a module that is muted shows as muted even when it has no notification on the page', async () => {
