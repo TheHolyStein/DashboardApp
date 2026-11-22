@@ -13,9 +13,9 @@
     "overdue": 1
   },
   "weatherHint": { "key": "rainAt", "vars": { "at": "2026-11-12T10:00:00.000Z", "mm": 1.2 } },
-  "pins": [{ "title": "Anna birthday" }],
+  "pins": [{ "key": "bday", "title": "Anna birthday" }],
   "alerts": [
     { "level": "critical", "title": "Smoke alarm" },
-    { "level": "warn", "title": "NAS degraded: disk 2 slow" }
+    { "level": "warn", "title": "", "kind": "nasDegraded", "vars": { "detail": "disk 2 slow" } }
   ]
 }

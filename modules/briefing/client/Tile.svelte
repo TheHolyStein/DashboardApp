@@ -1,10 +1,9 @@
 <script lang="ts">
-  // Briefing tile. Needs-setup state: not applicable, there is nothing to configure to see a briefing (the time zone
-  // setting has a default). Nothing in the tile is interactive: the shell's tile frame opens the detail pane.
+  // Briefing tile. Needs-setup state: not applicable, there is nothing to configure to see a briefing (nothing to set). Nothing in the tile is interactive: the shell's tile frame opens the detail pane.
   import { onMount, untrack } from 'svelte';
   import type { TileProps } from '@dash/contract';
   import type { Settings, Snapshot } from '../manifest.js';
-  import { countdown, formatDay, hintText } from './format.js';
+  import { alertKey, alertText, countdown, formatDay, hintText } from './format.js';
 
   let { data: pushed, size, t, locale, timeZone }: TileProps<Snapshot, Settings> = $props();
 
@@ -72,16 +71,16 @@
           </p>
         {/if}
         {#if hint}<p class="hint">{hint}</p>{/if}
-        {#each data.pins as pin (pin.title)}
+        {#each data.pins as pin (pin.key)}
           <p class="pin"><span data-user>{pin.title}</span></p>
         {/each}
       </div>
       {#if data.alerts.length > 0}
         <ul class="alerts">
-          {#each data.alerts as alert (alert.level + alert.title)}
+          {#each data.alerts as alert (alertKey(alert))}
             <li class={alert.level}>
               <span class="level">{alert.level === 'critical' ? t('m.briefing.critical', 'Critical') : t('m.briefing.warning', 'Warning')}</span>
-              <span data-user>{alert.title}</span>
+              <span data-user>{alertText(alert, t)}</span>
             </li>
           {/each}
         </ul>

@@ -1,8 +1,8 @@
-import type { AgendaEvent, Briefing, DayDetail, WeatherHint } from '../manifest.js';
+import type { AgendaEvent, AlertView, Briefing, DayDetail, WeatherHint } from '../manifest.js';
 import { ALERT_WINDOW_MS, MAX_ALERTS, type UserState } from './state.js';
 
 const RAIN_WINDOW_MS = 12 * 3600 * 1000;
-/** A weather update older than this is not trusted any more: no hint is better than a wrong one. */
+/** Deliberate rule: a weather update older than 6 h is not trusted any more; no hint is better than a wrong one. */
 export const WEATHER_MAX_AGE_MS = 6 * 3600 * 1000;
 const POLLEN_HIGH = 4;
 const HOT_C = 30;
@@ -71,32 +71,38 @@ function weatherHint(state: UserState, nowMs: number): WeatherHint | null {
   return { key: 'dry', vars: {} };
 }
 
-type Alert = { level: 'warn' | 'critical'; title: string; at: number };
+type Alert = AlertView & { at: number };
 
 /** Notification alerts of the last 24 h plus the household conditions that are bad right now, critical first, newest first. */
-function alertsOf(state: UserState, nowMs: number): Array<{ level: 'warn' | 'critical'; title: string }> {
+function alertsOf(state: UserState, nowMs: number): AlertView[] {
   const all: Alert[] = state.alerts
     .filter((a) => nowMs - Date.parse(a.at) < ALERT_WINDOW_MS)
-    .map((a) => ({ level: a.level, title: a.title, at: Date.parse(a.at) }));
+    .map((a): Alert => ({ level: a.level, title: a.title, at: Date.parse(a.at) }));
   const sys = state.system;
-  if (sys?.netOffline) all.push({ level: 'critical', title: 'Internet connection lost', at: Date.parse(sys.netOffline.since) });
+  if (sys?.netOffline) all.push({ level: 'critical', title: '', kind: 'netOffline', at: Date.parse(sys.netOffline.since) });
   if (sys?.nas) {
-    const label = sys.nas.status === 'failed' ? 'NAS failed' : 'NAS degraded';
     all.push({
       level: sys.nas.status === 'failed' ? 'critical' : 'warn',
-      title: sys.nas.detail ? `${label}: ${sys.nas.detail}` : label,
+      title: '',
+      kind: sys.nas.status === 'failed' ? 'nasFailed' : 'nasDegraded',
+      ...(sys.nas.detail ? { vars: { detail: sys.nas.detail } } : {}),
       at: Date.parse(sys.nas.at),
     });
   }
   const seen = new Set<string>();
   const unique = all.filter((a) => {
-    const key = `${a.level}\u0000${a.title}`;
+    const key = `${a.level}\u0000${a.kind ?? ''}\u0000${a.title}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
   unique.sort((a, b) => (a.level === b.level ? 0 : a.level === 'critical' ? -1 : 1) || b.at - a.at);
-  return unique.slice(0, MAX_ALERTS).map(({ level, title }) => ({ level, title }));
+  return unique.slice(0, MAX_ALERTS).map((a) => {
+    const view: AlertView = { level: a.level, title: a.title };
+    if (a.kind) view.kind = a.kind;
+    if (a.vars) view.vars = a.vars;
+    return view;
+  });
 }
 
 /** Events of the stored agenda that fall on `date` (a summary of another day contributes nothing). */
@@ -136,7 +142,7 @@ export function compose(state: UserState, now: Date, tz: string): Briefing {
     eventsToday: agendaOf(state, date).length,
     todos: todosOf(state, date),
     weatherHint: weatherHint(state, nowMs),
-    pins: state.pins.filter((p) => p.date === date).map((p) => ({ title: p.title })),
+    pins: state.pins.filter((p) => p.date === date).map((p) => ({ key: p.key, title: p.title })),
     alerts: alertsOf(state, nowMs),
   };
 }

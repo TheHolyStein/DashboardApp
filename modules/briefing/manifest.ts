@@ -1,22 +1,20 @@
 import { z } from 'zod';
 import { defineManifest } from '@dash/module-kit';
 
-/**
- * Per-instance settings. The server has no access to a user's saved preferences, so the time zone that
- * decides the greeting and what "today" means is a setting of the briefing itself.
- */
-export const settings = z.object({
-  timeZone: z
-    .string()
-    .default('UTC')
-    .meta({ label: 'Time zone', widget: 'timezone', help: 'Decides the greeting and which day is "today". Use your own time zone.' }),
-});
+/** No settings: the greeting and "today" follow the user's own time zone (`host.users()`). */
+export const settings = z.object({});
 export type Settings = z.infer<typeof settings>;
 
 export type WeatherHint = {
   key: 'rainAt' | 'dry' | 'hot' | 'frost' | 'storm' | 'pollenHigh';
   vars: Record<string, string | number>;
 };
+
+export type HouseholdAlertKind = 'netOffline' | 'nasDegraded' | 'nasFailed';
+/** `kind` is set for household conditions: `title` is then empty and the client renders `kind` + `vars` through `t()`. */
+export type AlertView = { level: 'warn' | 'critical'; title: string; kind?: HouseholdAlertKind; vars?: { detail?: string } };
+/** `key` is the pin's `sourceKey`: unique per user, so it is the client's list key (titles may repeat). */
+export type PinView = { key: string; title: string };
 
 /** What `compose` returns: the briefing of one user at one moment. Every section may be absent (empty or null). */
 export type Briefing = {
@@ -26,8 +24,8 @@ export type Briefing = {
   eventsToday: number;
   todos: { due: Array<{ title: string; list: string }>; overdue: number };
   weatherHint: WeatherHint | null;
-  pins: Array<{ title: string }>;
-  alerts: Array<{ level: 'warn' | 'critical'; title: string }>;
+  pins: PinView[];
+  alerts: AlertView[];
 };
 
 /** What the server pushes to a user's instance. `epoch` names the server boot, `rev` rises with every change of the briefing. */
@@ -43,7 +41,7 @@ export type DayDetail = {
   today: AgendaEvent[];
   tomorrow: AgendaEvent[];
   todos: { due: Array<{ title: string; list: string }>; overdue: number };
-  alerts: Array<{ level: 'warn' | 'critical'; title: string }>;
+  alerts: AlertView[];
 };
 
 export default defineManifest({

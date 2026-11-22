@@ -13,6 +13,10 @@ runClientContractSuite(client, { moduleDir, tileFixture: 'tile' });
 const START = '2026-11-12T07:30:00.000Z';
 const fixture = loadFixture<Snapshot>(moduleDir, 'tile');
 const settings: Settings = settingsSchema.parse({});
+const twoPins = [
+  { key: 'a', title: 'Same title' },
+  { key: 'b', title: 'Same title' },
+];
 const EMPTY: Snapshot = {
   epoch: fixture.epoch,
   rev: 1,
@@ -35,6 +39,7 @@ function tileProps(over: Partial<TileProps<Snapshot, Settings>> = {}): TileProps
     level: 'view',
     size: { w: 6, h: 2 },
     mode: 'day',
+    instanceId: 'i1',
     api: {} as ModuleApi,
     t: identityT,
     locale: 'en',
@@ -66,6 +71,7 @@ function detailProps(over: Partial<DetailProps<Snapshot, Settings>> = {}, api?: 
     settings,
     level: 'view',
     mode: 'day',
+    instanceId: 'i1',
     api: { get: () => Promise.resolve(DAY), ...api } as ModuleApi,
     t: identityT,
     locale: 'en',
@@ -137,13 +143,13 @@ describe('Tile', () => {
   });
 
   test('a snapshot with an older rev than the one shown is ignored, a newer one applies', async () => {
-    const { rerender } = render(client.Tile, { props: tileProps({ data: { ...EMPTY, rev: 5, pins: [{ title: 'Kept pin' }] } }) });
+    const { rerender } = render(client.Tile, { props: tileProps({ data: { ...EMPTY, rev: 5, pins: [{ key: 'k', title: 'Kept pin' }] } }) });
     expect(screen.getByText('Kept pin')).toBeTruthy();
     await rerender(tileProps({ data: { ...EMPTY, rev: 4, pins: [] } }));
     expect(screen.getByText('Kept pin')).toBeTruthy();
     await rerender(tileProps({ data: { ...EMPTY, rev: 6, pins: [] } }));
     expect(screen.queryByText('Kept pin')).toBeNull();
-    await rerender(tileProps({ data: { ...EMPTY, epoch: 'boot-2', rev: 1, pins: [{ title: 'After restart' }] } }));
+    await rerender(tileProps({ data: { ...EMPTY, epoch: 'boot-2', rev: 1, pins: [{ key: 'r', title: 'After restart' }] } }));
     expect(screen.getByText('After restart')).toBeTruthy(); // a new epoch wins even with a lower rev
   });
 
@@ -151,6 +157,17 @@ describe('Tile', () => {
     render(client.Tile, { props: tileProps({ locale: 'de-DE', timeZone: 'Asia/Kolkata' }) });
     expect(screen.getByText('Donnerstag, 12. November')).toBeTruthy();
     expect(screen.getByText('Rain expected around 15:30')).toBeTruthy();
+  });
+
+  test('two pins with the same title render without a duplicate-key error', () => {
+    render(client.Tile, { props: tileProps({ data: { ...EMPTY, pins: twoPins } }) });
+    expect(screen.getAllByText('Same title')).toHaveLength(2);
+  });
+
+  test('household alerts render through t() from kind and vars', () => {
+    const data: Snapshot = { ...EMPTY, alerts: [{ level: 'warn', title: '', kind: 'nasDegraded', vars: { detail: 'disk 2 slow' } }] };
+    render(client.Tile, { props: tileProps({ data }) });
+    expect(screen.getByText('NAS degraded: disk 2 slow')).toBeTruthy();
   });
 
   test('the tile renders no edit controls and no data-edit attribute', () => {
@@ -170,6 +187,20 @@ describe('Detail', () => {
     expect(screen.getByText('Milk')).toBeTruthy();
     expect(screen.getByText('Smoke alarm')).toBeTruthy();
     expect(screen.getByText('Critical')).toBeTruthy();
+  });
+
+  test('two pins with the same title render in the detail pane', async () => {
+    render(client.Detail, { props: detailProps({ data: { ...fixture, pins: twoPins } }) });
+    await waitFor(() => expect(screen.getAllByText('Same title')).toHaveLength(2));
+  });
+
+  test('two agenda rows with the same uid on different starts both render', async () => {
+    const day: DayDetail = { ...DAY, today: [
+      { uid: 'x', title: 'Recurring', start: '2026-11-12T08:00:00.000Z', end: '2026-11-12T09:00:00.000Z', allDay: false },
+      { uid: 'x', title: 'Recurring', start: '2026-11-12T15:00:00.000Z', end: '2026-11-12T16:00:00.000Z', allDay: false },
+    ] };
+    render(client.Detail, { props: detailProps({}, { get: apiGet(() => Promise.resolve(day)) }) });
+    await waitFor(() => expect(screen.getAllByText('Recurring')).toHaveLength(2));
   });
 
   test('a rejected fetch shows an error line and keeps the snapshot content', async () => {

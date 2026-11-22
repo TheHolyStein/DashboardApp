@@ -1,6 +1,6 @@
 // Formatting helpers shared by the Briefing tile and detail. Pure; only a formatter cache as module state.
 import type { Translate } from '@dash/contract';
-import type { WeatherHint } from '../manifest.js';
+import type { AlertView, WeatherHint } from '../manifest.js';
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
@@ -83,3 +83,21 @@ export function listName(list: string, t: Translate): string {
   const known = (LISTS as readonly string[]).includes(list) ? (list as (typeof LISTS)[number]) : null;
   return known ? t(`m.briefing.list.${known}`, LIST_NAMES[known]) : list;
 }
+
+/** Display text of an alert: household conditions are translated from `kind` + `vars`, notification titles are shown as sent. */
+export function alertText(alert: AlertView, t: Translate): string {
+  const detail = alert.vars?.detail;
+  switch (alert.kind) {
+    case 'netOffline':
+      return t('m.briefing.alert.netOffline', 'Internet connection lost');
+    case 'nasFailed':
+      return detail ? t('m.briefing.alert.nasFailed.detail', 'NAS failed: {detail}', { detail }) : t('m.briefing.alert.nasFailed', 'NAS failed');
+    case 'nasDegraded':
+      return detail ? t('m.briefing.alert.nasDegraded.detail', 'NAS degraded: {detail}', { detail }) : t('m.briefing.alert.nasDegraded', 'NAS degraded');
+    default:
+      return alert.title;
+  }
+}
+
+/** List key of an alert: unique because the server de-duplicates on the same triple. */
+export const alertKey = (a: AlertView): string => `${a.level}|${a.kind ?? ''}|${a.title}`;

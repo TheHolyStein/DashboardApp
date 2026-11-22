@@ -65,7 +65,7 @@ export const ownPart = (s: UserState): UserState => {
   return own;
 };
 
-const cut = (s: string): string => (s.length > MAX_TITLE ? s.slice(0, MAX_TITLE) : s);
+export const cut = (s: string): string => (s.length > MAX_TITLE ? s.slice(0, MAX_TITLE) : s);
 
 /** YYYY-MM-DD from a date or date-time string, else null. */
 export function dateOnly(s: string): string | null {

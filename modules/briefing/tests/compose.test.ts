@@ -68,10 +68,10 @@ describe('compose', () => {
         overdue: 1,
       },
       weatherHint: { key: 'rainAt', vars: { at: '2026-11-12T10:00:00.000Z', mm: 1.2 } },
-      pins: [{ title: 'Anna birthday' }],
+      pins: [{ key: 'p1', title: 'Anna birthday' }],
       alerts: [
         { level: 'critical', title: 'Smoke alarm' },
-        { level: 'warn', title: 'NAS degraded: disk 2 slow' },
+        { level: 'warn', title: '', kind: 'nasDegraded', vars: { detail: 'disk 2 slow' } },
         { level: 'warn', title: 'Disk 90% full' },
       ],
     });
@@ -106,7 +106,7 @@ describe('compose', () => {
 
   test('pin disappears next day', () => {
     const state: UserState = { ...emptyState(), pins: [{ key: 'p', title: 'Anna birthday', date: '2026-11-12' }] };
-    expect(compose(state, new Date('2026-11-12T22:59:00.000Z'), TZ).pins).toEqual([{ title: 'Anna birthday' }]); // 23:59 on the 12th
+    expect(compose(state, new Date('2026-11-12T22:59:00.000Z'), TZ).pins).toEqual([{ key: 'p', title: 'Anna birthday' }]); // 23:59 on the 12th
     expect(compose(state, new Date('2026-11-12T23:00:00.000Z'), TZ).pins).toEqual([]); // 00:00 on the 13th
     expect(compose(state, new Date('2026-11-13T07:30:00.000Z'), TZ).pins).toEqual([]);
   });
@@ -212,8 +212,8 @@ describe('compose', () => {
       alerts: [1, 2, 3, 4, 5].map((i) => ({ id: `a${i}`, level: 'warn' as const, title: `W${i}`, at: `2026-11-12T0${i}:00:00.000Z` })),
       system: { netOffline: { since: '2026-11-12T00:30:00.000Z' } },
     };
-    const titles = compose(state, NOW, TZ).alerts.map((a) => a.title);
-    expect(titles).toEqual(['Internet connection lost', 'W5', 'W4', 'W3', 'W2']);
+    const titles = compose(state, NOW, TZ).alerts.map((a) => a.kind ?? a.title);
+    expect(titles).toEqual(['netOffline', 'W5', 'W4', 'W3', 'W2']);
   });
 
   test('localDate follows the time zone and survives an unknown one', () => {

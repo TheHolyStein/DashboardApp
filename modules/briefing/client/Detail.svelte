@@ -6,7 +6,7 @@
   import type { DetailProps } from '@dash/contract';
   import { Button, Empty } from '@dash/ui';
   import type { AgendaEvent, DayDetail, Settings, Snapshot } from '../manifest.js';
-  import { formatClock, formatDay, hintText, listName } from './format.js';
+  import { alertKey, alertText, formatClock, formatDay, hintText, listName } from './format.js';
 
   let { data, isOwner, api, t, locale, timeZone, close }: DetailProps<Snapshot, Settings> = $props();
 
@@ -51,7 +51,7 @@
 
 {#snippet agenda(events: AgendaEvent[])}
   <ul class="rows">
-    {#each events as event (event.uid)}
+    {#each events as event (event.uid + event.start)}
       <li>
         <span class="time" data-value>{event.allDay ? '' : formatClock(event.start, locale, timeZone)}</span>
         {#if event.allDay}<span class="time">{t('m.briefing.allDay', 'All day')}</span>{/if}
@@ -76,10 +76,10 @@
     <section aria-labelledby="briefing-alerts">
       <h4 id="briefing-alerts">{t('m.briefing.alerts', 'Alerts')}</h4>
       <ul class="rows">
-        {#each alerts as alert (alert.level + alert.title)}
+        {#each alerts as alert (alertKey(alert))}
           <li class={alert.level}>
             <span class="level">{alert.level === 'critical' ? t('m.briefing.critical', 'Critical') : t('m.briefing.warning', 'Warning')}</span>
-            <span data-user>{alert.title}</span>
+            <span data-user>{alertText(alert, t)}</span>
           </li>
         {/each}
       </ul>
@@ -125,7 +125,7 @@
     <section aria-labelledby="briefing-pins">
       <h4 id="briefing-pins">{t('m.briefing.pins', 'Pinned for today')}</h4>
       <ul class="rows">
-        {#each data.pins as pin (pin.title)}
+        {#each data.pins as pin (pin.key)}
           <li><span class="title" data-user>{pin.title}</span></li>
         {/each}
       </ul>

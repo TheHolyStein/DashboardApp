@@ -7,9 +7,7 @@ of them missing (a missing source simply leaves its section out).
 
 ## Settings
 
-| Key | Meaning |
-|---|---|
-| `timeZone` | IANA zone (default `UTC`). The server cannot read the user's saved preferences, so this zone decides the greeting and which date is "today". Set it to your own. |
+None. The greeting and which date is "today" follow the user's own time zone (`host.users()`; UTC when unknown).
 
 ## Events
 
@@ -30,7 +28,9 @@ instance is removed, and at start for users without an instance.
 ## Limits
 
 - Frost and heat use the current temperature (`tempC`): the weather event carries no daily minimum or maximum.
-- Alert titles for connectivity and NAS conditions are English text from the server (the events carry no translation keys).
+- Household alerts (connectivity, NAS) are sent as a `kind` (`netOffline`, `nasDegraded`, `nasFailed`) with optional `vars.detail` (capped at 200 characters) and translated on the client; pins carry their `sourceKey` as `key`.
+- `WEATHER_MAX_AGE_MS` (6 h) is a deliberate rule: a weather update older than that gives no hint at all, because no hint is better than a wrong one.
+- The rev ignores `minutesUntil` (the client derives it from `start`); events for users without a briefing instance are dropped, nothing is stored.
 - The agenda shows the date of the last `calendar.day.summary` (normally today); tomorrow appears only if a summary for
   tomorrow was the last one received.
 - Reading state of notifications is not visible to the briefing: it shows warn and critical notifications of the last 24 h

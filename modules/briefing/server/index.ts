@@ -1,8 +1,8 @@
 import type { EventPayload, HostServices, UserId } from '@dash/contract';
 import { abortable, createSnapshotPusher, defineServer, newId, type SnapshotPusher } from '@dash/module-kit';
-import manifest, { settings as settingsSchema, type DayDetail, type Snapshot } from '../manifest.js';
+import manifest, { type DayDetail, type Snapshot } from '../manifest.js';
 import { compose, composeDay, localDate } from './compose.js';
-import { emptyState, ownPart, prune, withAlert, withCalendar, withPin, withTodos, withUpcoming, type SystemState, type UserState, type WeatherState } from './state.js';
+import { cut, emptyState, ownPart, prune, withAlert, withCalendar, withPin, withTodos, withUpcoming, type SystemState, type UserState, type WeatherState } from './state.js';
 
 const USER_PREFIX = 'u:';
 const REV_PREFIX = 'rev:';
@@ -65,12 +65,13 @@ function createBriefingServer() {
   }
   const loadGlobal = async (host: HostServices): Promise<GlobalState> => (await host.store.get<GlobalState>(GLOBAL_KEY)) ?? {};
 
-  /** Time zone of the user's briefing instance; UTC when they have none (yet). */
-  function tzOf(instances: Array<{ ownerId: UserId; settings: unknown }>, id: UserId): string {
-    const mine = instances.find((i) => i.ownerId === id);
-    const parsed = mine ? settingsSchema.safeParse(mine.settings) : undefined;
-    return parsed?.success ? parsed.data.timeZone : DEFAULT_TZ;
+  /** The user's own time zone from their account; UTC when unknown. */
+  async function tzOf(host: HostServices, id: UserId): Promise<string> {
+    const user = (await host.users()).find((u) => u.id === id);
+    return user?.timeZone || DEFAULT_TZ;
   }
+
+  const hasInstance = async (host: HostServices, id: UserId): Promise<boolean> => (await host.instances()).some((i) => i.ownerId === id);
 
   async function persistRev(host: HostServices, id: UserId, rev: number): Promise<void> {
     try {
@@ -90,11 +91,13 @@ function createBriefingServer() {
     const instances = (await host.instances<unknown>()).filter((i) => i.ownerId === id);
     if (instances.length === 0) return;
     const now = host.now();
-    const tz = tzOf(instances, id);
+    const tz = await tzOf(host, id);
     const full: UserState = { ...prune(own, now, tz), ...global };
     const briefing = compose(full, now, tz);
     const { epoch, pusher, revs, seen } = need();
-    const json = JSON.stringify([briefing, composeDay(full, now, tz)]);
+    // `minutesUntil` moves every minute and the client derives it from `start`: it must not raise the rev.
+    const { next, ...rest } = briefing;
+    const json = JSON.stringify([rest, next && { title: next.title, start: next.start }, composeDay(full, now, tz)]);
     let rev = revs.get(id) ?? 0;
     let raised = false;
     if (seen.get(id) !== json) {
@@ -111,8 +114,9 @@ function createBriefingServer() {
   /** Reads, prunes, changes and stores one user's state, then publishes it. `change` gets the user's local date. */
   function updateUser(host: HostServices, id: UserId, change: (s: UserState, today: string, nowMs: number) => UserState): Promise<void> {
     return locked(id, async () => {
+      if (!(await hasInstance(host, id))) return; // no briefing for this user: store nothing
       const now = host.now();
-      const tz = tzOf(await host.instances<unknown>(), id);
+      const tz = await tzOf(host, id);
       const own = prune(await loadOwn(host, id), now, tz);
       await host.store.set(userKey(id), ownPart(change(own, localDate(now, tz), now.getTime())));
       await publish(host, id);
@@ -146,7 +150,7 @@ function createBriefingServer() {
   function refreshUser(host: HostServices, id: UserId): Promise<void> {
     return locked(id, async () => {
       const now = host.now();
-      const tz = tzOf(await host.instances<unknown>(), id);
+      const tz = await tzOf(host, id);
       const own = await loadOwn(host, id);
       const pruned = prune(own, now, tz);
       if (JSON.stringify(pruned) !== JSON.stringify(own)) await host.store.set(userKey(id), ownPart(pruned));
@@ -161,7 +165,7 @@ function createBriefingServer() {
     const own = await loadOwn(host, id);
     const global = await loadGlobal(host);
     const now = host.now();
-    const tz = tzOf(await host.instances<unknown>(), id);
+    const tz = await tzOf(host, id);
     return { epoch, rev, ...composeDay({ ...prune(own, now, tz), ...global }, now, tz) };
   }
 
@@ -230,7 +234,7 @@ function createBriefingServer() {
         await updateGlobal(host, (g) => {
           const system: SystemState = {};
           if (g.system?.netOffline) system.netOffline = g.system.netOffline;
-          if (event.status !== 'ok') system.nas = { status: event.status, detail: event.detail, at };
+          if (event.status !== 'ok') system.nas = { status: event.status, detail: cut(event.detail), at };
           return { ...g, system };
         });
       },

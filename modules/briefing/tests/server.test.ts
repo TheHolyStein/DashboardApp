@@ -8,12 +8,19 @@ import type { DayDetail, Snapshot } from '../manifest.js';
 runServerContractSuite(server, { moduleDir: import.meta.dirname + '/..' });
 
 const START = new Date('2026-11-12T07:30:00.000Z'); // 08:30 in Berlin, 07:30 in UTC
-const inst = (id: string, ownerId: string, timeZone: string): ModuleInstance => ({ id, ownerId, pageId: 'p1', settings: { timeZone } });
+const inst = (id: string, ownerId: string): ModuleInstance => ({ id, ownerId, pageId: 'p1', settings: {} });
 
 async function setup() {
   const host = await createMockHostWithSetup(server, {
     now: START,
-    prepare: (h) => h.setInstances([inst('i1', 'u1', 'Europe/Berlin'), inst('i2', 'u2', 'UTC')]),
+    prepare: (h) => {
+      h.setUsers([
+        { id: 'u1', name: 'One', handle: 'one', timeZone: 'Europe/Berlin' },
+        { id: 'u2', name: 'Two', handle: 'two', timeZone: 'UTC' },
+        { id: 'u3', name: 'Three', handle: 'three', timeZone: 'UTC' }, // no briefing instance
+      ]);
+      h.setInstances([inst('i1', 'u1'), inst('i2', 'u2')]);
+    },
   });
   const router = createMockRouter(server, host);
   const send = async <E extends EventName>(name: E, payload: EventPayload<E>): Promise<void> => {
@@ -83,7 +90,7 @@ describe('event handlers', () => {
   test('pin.request pins for the listed users only, and the pin is gone the next day', async () => {
     const { send, last, pushedTo, host, compose } = await setup();
     await send('pin.request', { sourceKey: 'bday', title: 'Anna birthday', date: '2026-11-12', userIds: ['u1'] });
-    expect(last('i1').pins).toEqual([{ title: 'Anna birthday' }]);
+    expect(last('i1').pins).toEqual([{ key: 'bday', title: 'Anna birthday' }]);
     expect(pushedTo('i2')).toEqual([]);
     host.setNow(new Date('2026-11-12T23:30:00.000Z')); // 00:30 on the 13th in Berlin
     await compose();
@@ -119,8 +126,8 @@ describe('event handlers', () => {
     await send('net.connectivity.changed', { online: false, since: '2026-11-12T07:00:00.000Z' });
     await send('nas.health.changed', { status: 'degraded', detail: 'disk 2 slow' });
     expect(last('i2').alerts).toEqual([
-      { level: 'critical', title: 'Internet connection lost' },
-      { level: 'warn', title: 'NAS degraded: disk 2 slow' },
+      { level: 'critical', title: '', kind: 'netOffline' },
+      { level: 'warn', title: '', kind: 'nasDegraded', vars: { detail: 'disk 2 slow' } },
     ]);
     await send('net.connectivity.changed', { online: true, since: '2026-11-12T07:20:00.000Z' });
     await send('nas.health.changed', { status: 'ok', detail: '' });
@@ -128,13 +135,57 @@ describe('event handlers', () => {
     expect(last('i2').alerts).toEqual([]);
   });
 
-  test('the time zone of the instance decides what today is', async () => {
+  test('the time zone of the account decides what today is', async () => {
     const { host, send, last } = await setup();
     host.setNow(new Date('2026-11-12T23:30:00.000Z')); // already the 13th in Berlin, still the 12th in UTC
     await send('calendar.day.summary', summary('u1', 'Berlin event'));
     await send('calendar.day.summary', summary('u2', 'UTC event', '2026-11-12T23:45:00.000Z'));
     expect(last('i1')).toMatchObject({ date: '2026-11-13', eventsToday: 0, next: null });
     expect(last('i2')).toMatchObject({ date: '2026-11-12', eventsToday: 1, next: { title: 'UTC event', minutesUntil: 15 } });
+  });
+});
+
+describe('review fixes', () => {
+  test('the NAS detail is capped at 200 characters before it is stored', async () => {
+    const { send, host } = await setup();
+    await send('nas.health.changed', { status: 'failed', detail: 'x'.repeat(500) });
+    const g = await host.store.get<{ system: { nas: { detail: string } } }>('g');
+    expect(g?.system.nas.detail).toHaveLength(200);
+  });
+
+  test('minutesUntil moving on does not raise the rev, but a snapshot is still pushed', async () => {
+    const { send, host, pushedTo, compose } = await setup();
+    await send('calendar.day.summary', summary('u1', 'Standup', '2026-11-12T08:30:00.000Z'));
+    const first = pushedTo('i1').at(-1)!;
+    host.advance(10 * 60_000);
+    await compose();
+    const last = pushedTo('i1').at(-1)!;
+    expect(last.next?.minutesUntil).toBe(50);
+    expect(last.rev).toBe(first.rev);
+  });
+
+  test('events for a user without a briefing instance store nothing', async () => {
+    const { send, host, pushedTo } = await setup();
+    await send('todo.day.summary', { userId: 'u3', date: '2026-11-12', overdue: 1, due: [] });
+    await send('pin.request', { sourceKey: 'k', title: 'P', date: '2026-11-12', userIds: ['u3'] });
+    expect(await host.store.keys()).toEqual([]);
+    expect(pushedTo('i1')).toEqual([]);
+  });
+
+  test('a handler error does not block the next event for that user', async () => {
+    const { send, host, last } = await setup();
+    const real = host.store.set.bind(host.store);
+    let fail = true;
+    host.store.set = (async (key: string, value: unknown) => {
+      if (fail) {
+        fail = false;
+        throw new Error('disk full');
+      }
+      return real(key, value);
+    });
+    await expect(send('calendar.day.summary', summary('u1', 'Lost'))).rejects.toThrow('disk full');
+    await send('calendar.day.summary', summary('u1', 'Kept'));
+    expect(last('i1').next?.title).toBe('Kept');
   });
 });
 
@@ -187,7 +238,7 @@ describe('bounds and ordering', () => {
     expect(stored?.calendar?.events).toHaveLength(1);
     expect(stored?.todo?.overdue).toBe(1);
     expect(stored?.pins).toHaveLength(1);
-    expect(last('i1')).toMatchObject({ eventsToday: 1, todos: { overdue: 1 }, pins: [{ title: 'Pin' }] });
+    expect(last('i1')).toMatchObject({ eventsToday: 1, todos: { overdue: 1 }, pins: [{ key: 'k', title: 'Pin' }] });
     expect((last('i1').rev)).toBeGreaterThanOrEqual(1);
   });
 });
@@ -209,12 +260,12 @@ describe('compose job and instances', () => {
   test('a new instance gets the stored briefing, a removed one drops its state', async () => {
     const { send, host, pushedTo } = await setup();
     await send('calendar.day.summary', summary('u1', 'Standup'));
-    const added = inst('i3', 'u1', 'Europe/Berlin');
-    host.setInstances([inst('i1', 'u1', 'Europe/Berlin'), inst('i2', 'u2', 'UTC'), added]);
+    const added = inst('i3', 'u1');
+    host.setInstances([inst('i1', 'u1'), inst('i2', 'u2'), added]);
     await server.onInstanceChange!('added', added, host);
     expect(pushedTo('i3').at(-1)?.next?.title).toBe('Standup');
-    host.setInstances([inst('i2', 'u2', 'UTC')]);
-    await server.onInstanceChange!('removed', inst('i1', 'u1', 'Europe/Berlin'), host);
+    host.setInstances([inst('i2', 'u2')]);
+    await server.onInstanceChange!('removed', inst('i1', 'u1'), host);
     await server.onInstanceChange!('removed', added, host);
     expect(await host.store.get('u:u1')).toBeUndefined();
   });
@@ -223,7 +274,7 @@ describe('compose job and instances', () => {
     const seeded = await createMockHostWithSetup(server, {
       now: START,
       prepare: (h) => {
-        h.setInstances([inst('i1', 'u1', 'UTC')]);
+        h.setInstances([inst('i1', 'u1')]);
         void h.store.set('u:ghost', { pins: [], alerts: [] });
         void h.store.set('rev:ghost', 4);
         void h.store.set('u:u1', { pins: [], alerts: [] });
