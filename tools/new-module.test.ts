@@ -8,6 +8,9 @@ const ID = 'zz-scaffold-test';
 const THEME = 'zz-scaffold-theme';
 const lockFile = path.join(REPO_ROOT, 'pnpm-lock.yaml');
 const lockBefore = readFileSync(lockFile, 'utf8');
+// Linking a scaffolded package changes the lockfile (restored in afterAll), so this install may not be frozen —
+// on CI (CI=true) pnpm would otherwise default to --frozen-lockfile and refuse.
+const LINK = 'pnpm install --offline --no-frozen-lockfile';
 const run = (cmd: string): string => execSync(cmd, { cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' });
 
 afterAll(() => {
@@ -24,7 +27,7 @@ afterAll(() => {
 test('new:module creates a module whose own tests pass', { timeout: 240_000 }, () => {
   run(`node tools/new-module.ts ${ID}`);
   expect(readFileSync(path.join(REPO_ROOT, 'modules', ID, 'manifest.ts'), 'utf8')).toContain(`id: '${ID}'`);
-  run('pnpm install --offline');
+  run(LINK);
   const out = run(`pnpm --filter @dash/module-${ID} test`);
   expect(out).toMatch(/passed/);
   run(`pnpm --filter @dash/module-${ID} typecheck`);
@@ -33,7 +36,7 @@ test('new:module creates a module whose own tests pass', { timeout: 240_000 }, (
 
 test('new:theme creates a theme whose own tests pass', { timeout: 240_000 }, () => {
   run(`node tools/new-theme.ts ${THEME}`);
-  run('pnpm install --offline');
+  run(LINK);
   expect(run(`pnpm --filter @dash/theme-${THEME} test`)).toMatch(/passed/);
   run(`pnpm --filter @dash/theme-${THEME} typecheck`);
   run(`pnpm exec eslint themes/${THEME}`);
