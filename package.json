@@ -10,6 +10,7 @@
     "predev": "pnpm gen",
     "dev": "node tools/dev.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "prelint": "pnpm gen",
     "lint": "eslint . --ignore-pattern tools/lint-fixtures",
     "pretypecheck": "pnpm gen",
     "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p tsconfig.json",
