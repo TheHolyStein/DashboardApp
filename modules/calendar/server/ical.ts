@@ -453,3 +453,40 @@ export function withOverridesOf(ics: string, next: string): string {
   for (const ev of old.events) if (ev.parsed.recurrenceId !== '') root.addSubcomponent(ev.vevent);
   return root.toString();
 }
+
+/** Most events a subscription may hold. */
+export const MAX_FEED_EVENTS = 5000;
+
+/**
+ * Splits a whole calendar feed into one VCALENDAR per UID (master and overrides together, with the VTIMEZONEs they
+ * use). Throws DashError('invalid') when any part of it cannot be read, or it holds more than `MAX_FEED_EVENTS` events.
+ */
+export function splitFeed(ics: string): Array<{ uid: string; ics: string }> {
+  const root = parseRoot(ics);
+  const vevents = root.getAllSubcomponents('vevent');
+  if (vevents.length > MAX_FEED_EVENTS) throw invalid(`the feed has more than ${MAX_FEED_EVENTS} events`);
+  const groups = new Map<string, ICAL.Component[]>();
+  for (const ve of vevents) {
+    const uid = ve.getFirstPropertyValue('uid');
+    if (typeof uid !== 'string' || uid === '') throw invalid('VEVENT without UID');
+    const list = groups.get(uid) ?? [];
+    list.push(ve);
+    groups.set(uid, list);
+  }
+  const out: Array<{ uid: string; ics: string }> = [];
+  for (const [uid, list] of groups) {
+    const cal = new ICAL.Component('vcalendar');
+    cal.addPropertyWithValue('version', '2.0');
+    cal.addPropertyWithValue('prodid', '-//Home Dashboard//Calendar subscription//EN');
+    const used = tzidsOf(new ICAL.Component(['vcalendar', [], list.map((v) => v.toJSON() as [string, unknown[], unknown[]])]));
+    for (const tzid of used) {
+      const vtz = root.getAllSubcomponents('vtimezone').find((z) => z.getFirstPropertyValue('tzid') === tzid);
+      if (vtz) cal.addSubcomponent(new ICAL.Component(vtz.toJSON() as [string, unknown[], unknown[]]));
+    }
+    for (const ve of list) cal.addSubcomponent(new ICAL.Component(ve.toJSON() as [string, unknown[], unknown[]]));
+    const text = cal.toString();
+    readResource(text); // every resource must be readable, or nothing is imported
+    out.push({ uid, ics: text });
+  }
+  return out;
+}

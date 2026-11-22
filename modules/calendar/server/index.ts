@@ -18,6 +18,13 @@ import {
 } from './calendars.js';
 import { migrations } from './migrations.js';
 import { registerEventRoutes, type AfterWrite } from './routes-events.js';
+import {
+  NewSubscription,
+  createSubscription,
+  deleteSubscription,
+  refreshSubscription,
+  subscriptionCalendars,
+} from './subscriptions.js';
 
 const Color = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be #rrggbb');
 const Name = z.string().trim().min(1).max(80);
@@ -74,8 +81,15 @@ function createServer() {
       reminders: () => Promise.resolve(),
       // TODO(C5): derived items (todo.create.request, pin.request, countdown.request, wled.apply.request).
       derive: () => Promise.resolve(),
-      // TODO(C4): refresh read-only subscriptions through host.http.
-      subscriptions: () => Promise.resolve(),
+      // Read-only subscriptions: fetched one after another (they share host.http's limits), imported atomically each.
+      subscriptions: async ({ host, signal }) => {
+        const changes = [];
+        for (const cal of subscriptionCalendars(host.store.db)) {
+          if (signal.aborted) return;
+          changes.push(...(await refreshSubscription(host, cal, signal)));
+        }
+        if (changes.length > 0) await afterWrite(host, changes);
+      },
     },
     routes(r, host) {
       const db = host.store.db;
@@ -85,6 +99,22 @@ function createServer() {
       r.raw('/.well-known/caldav', notImplemented);
 
       registerEventRoutes(r, host, afterWrite);
+
+      r.post('/subscriptions', { level: 'edit', body: NewSubscription }, async (req) => {
+        ensurePersonal(db, req.user.id, host.now());
+        const row = createSubscription(db, req.user.id, req.body, host.now());
+        // First import right away; a failure is reported to the owner and retried by the hourly job.
+        const changes = await refreshSubscription(host, row);
+        if (changes.length > 0) await afterWrite(host, changes);
+        return toCalendarDto(host, row, req.user.id);
+      });
+
+      r.delete('/subscriptions/:id', { level: 'edit' }, async (req) => {
+        const id = req.params['id'] ?? '';
+        deleteSubscription(db, id, req.user.id);
+        await refresh(host);
+        return undefined;
+      });
 
       r.get('/calendars', { level: 'view' }, (req) => {
         ensurePersonal(db, req.user.id, host.now());
