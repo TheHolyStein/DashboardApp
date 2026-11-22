@@ -1,0 +1,28 @@
+/* Fallback token values; a theme (later task) overrides them on :root[data-theme][data-mode]. */
+:root {
+  --db-bg: #f6f7f9;
+  --db-fg: #15181d;
+  --db-muted: #4a5260;
+  --db-accent: #1f5fd1;
+  --db-surface: #ffffff;
+  --db-border-color: #c9ced6;
+  --db-border: 1px solid var(--db-border-color);
+  --db-radius: 8px;
+  --db-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --db-focus: #1f5fd1;
+  --db-crit: #b3261e;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+/* The page colour sits on html so that the theme's background layer (z-index -1) shows through the transparent body. */
+html { background: var(--db-bg); }
+body {
+  background: transparent;
+  color: var(--db-fg);
+  font-family: var(--db-font-body);
+  line-height: 1.4;
+}
+:focus-visible { outline: 2px solid var(--db-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

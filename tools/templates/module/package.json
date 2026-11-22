@@ -1,0 +1,21 @@
+{
+  "name": "@dash/module-__ID__",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dash/contract": "workspace:*",
+    "@dash/module-kit": "workspace:*",
+    "@dash/ui": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testing-library/svelte": "^5.4.2",
+    "svelte": "^5.57.3",
+    "vitest": "^5.1.0"
+  }
+}

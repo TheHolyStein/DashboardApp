@@ -1,0 +1,48 @@
+[Unit]
+Description=Home Dashboard
+Documentation=file:///opt/dashboard/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dashboard
+WorkingDirectory=/opt/dashboard
+EnvironmentFile=/etc/dashboard/env
+ExecStart=/usr/bin/node apps/server/dist/main.js
+Restart=on-failure
+RestartSec=3
+UMask=0027
+
+# Resource limits
+MemoryHigh=300M
+MemoryMax=400M
+
+# Sandbox. MemoryDenyWriteExecute is deliberately NOT set: Node's JIT needs W^X transitions.
+# IPAddressDeny/IPAddressAllow are deliberately NOT set: modules need outbound network.
+# Directories are created by install.sh, so StateDirectory= is not used.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dashboard
+ReadOnlyPaths=/etc/dashboard
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

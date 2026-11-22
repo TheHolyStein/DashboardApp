@@ -1,0 +1,21 @@
+{
+  "epoch": "boot-1",
+  "rev": 3,
+  "greeting": "morning",
+  "date": "2026-11-12",
+  "next": { "title": "Team standup", "start": "2026-11-12T08:00:00.000Z", "minutesUntil": 30 },
+  "eventsToday": 3,
+  "todos": {
+    "due": [
+      { "title": "Pay rent", "list": "deadline" },
+      { "title": "Milk", "list": "shopping" }
+    ],
+    "overdue": 1
+  },
+  "weatherHint": { "key": "rainAt", "vars": { "at": "2026-11-12T10:00:00.000Z", "mm": 1.2 } },
+  "pins": [{ "key": "bday", "title": "Anna birthday" }],
+  "alerts": [
+    { "level": "critical", "title": "Smoke alarm" },
+    { "level": "warn", "title": "", "kind": "nasDegraded", "vars": { "detail": "disk 2 slow" } }
+  ]
+}

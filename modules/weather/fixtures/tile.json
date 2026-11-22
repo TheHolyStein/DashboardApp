@@ -1,0 +1,12 @@
+{
+  "place": "Berlin",
+  "units": "metric",
+  "now": { "tempC": 20, "feelsC": 18.5, "condition": "rain", "windKph": 15.1, "humidity": 86 },
+  "nextPrecip": { "at": "2026-01-01T15:00:00.000Z", "mm": 0.6 },
+  "today": { "minC": 12, "maxC": 22.4, "uvMax": 5.2, "sunrise": "2026-01-01T07:10:00.000Z", "sunset": "2026-01-01T15:30:00.000Z" },
+  "pollen": [
+    { "type": "birch", "level": 2 },
+    { "type": "grass", "level": 4 }
+  ],
+  "air": { "aqi": 34, "band": "fair" }
+}

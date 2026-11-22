@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'modules/*'
+  - 'themes/*'
+
+allowBuilds:
+  esbuild: false
+  msw: false

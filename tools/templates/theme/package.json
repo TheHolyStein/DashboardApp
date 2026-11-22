@@ -1,0 +1,19 @@
+{
+  "name": "@dash/theme-__ID__",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dash": { "name": "__NAME__" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dash/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@dash/module-kit": "workspace:*",
+    "svelte": "^5.57.3",
+    "vitest": "^5.1.0"
+  }
+}

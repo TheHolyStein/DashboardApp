@@ -1,0 +1,32 @@
+// Example Tailscale ACL (Tailscale admin console -> Access controls). Adapt names, then paste.
+// Goal: the owner reaches everything; the second person's devices reach the dashboard's HTTPS
+// port and nothing else, on this machine or any other.
+{
+	// Who may put the tag on a machine. The tag marks the Futro as "the dashboard".
+	// Tag it once: tailscale up --advertise-tags=tag:dashboard
+	"tagOwners": {
+		"tag:dashboard": ["owner@example.com"],
+	},
+
+	// Named groups. "second-person" may be a member of the tailnet or a user the machine is
+	// shared with (shared machines are limited by these rules as well).
+	"groups": {
+		"group:owner":         ["owner@example.com"],
+		"group:second-person": ["partner@example.com"],
+	},
+
+	"acls": [
+		// Rule 1: the owner may reach every port on every machine (admin access, SSH, ...).
+		{"action": "accept", "src": ["group:owner"], "dst": ["*:*"]},
+
+		// Rule 2: the second person's devices may reach ONLY port 443 on the dashboard machine.
+		// No SSH, no other machines, no other ports. This is all they are granted.
+		{"action": "accept", "src": ["group:second-person"], "dst": ["tag:dashboard:443"]},
+	],
+
+	// Optional tests: Tailscale refuses to save the policy if one of these fails.
+	"tests": [
+		{"src": "partner@example.com", "accept": ["tag:dashboard:443"], "deny": ["tag:dashboard:22", "tag:dashboard:8787"]},
+		{"src": "owner@example.com", "accept": ["tag:dashboard:22", "tag:dashboard:443"]},
+	],
+}

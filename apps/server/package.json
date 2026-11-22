@@ -1,0 +1,32 @@
+{
+  "name": "@dash/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "cli": "node --experimental-transform-types --import ./src/auth/register-ts.ts ./src/auth/cli.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@dash/contract": "workspace:*",
+    "@dash/module-kit": "workspace:*",
+    "@fastify/static": "^10.1.10",
+    "@node-rs/argon2": "^2.2.2",
+    "better-sqlite3": "^13.1.1",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^6.0.1",
+    "otpauth": "^9.6.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "drizzle-kit": "^0.31.0",
+    "esbuild": "^0.28.2",
+    "vitest": "^5.1.0"
+  }
+}

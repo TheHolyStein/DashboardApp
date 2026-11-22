@@ -1,0 +1,17 @@
+[Unit]
+Description=Home Dashboard network scan helper socket
+# Inert until a later plan provides the helper binary.
+ConditionPathExists=/opt/dashboard/deploy/netscan/dashboard-netscan
+
+[Socket]
+ListenStream=/run/dashboard/netscan.sock
+SocketUser=root
+SocketGroup=dashboard
+SocketMode=0660
+# The directory itself is traversable; access is controlled by the socket's mode and group.
+DirectoryMode=0755
+Accept=no
+Service=dashboard-netscan.service
+
+[Install]
+WantedBy=sockets.target
